@@ -1,0 +1,213 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}IP Transcoder Overview (v3){% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <style>
+    .tx-wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .tx-card {
+      margin-bottom: 1.5rem;
+      padding: 1rem 1.25rem;
+      border: 1px solid #444;
+      border-radius: 6px;
+      background: #111;
+    }
+    .tx-card h2 {
+      margin-top: 0;
+      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+    }
+    .tx-pills {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+    }
+    .tx-pill {
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      background: #222;
+      border: 1px solid #444;
+    }
+    .tx-table {
+      width: 100%;
+      margin-top: 0.75rem;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .tx-table th,
+    .tx-table td {
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid #333;
+      vertical-align: top;
+    }
+    .tx-table th {
+      text-align: left;
+      background: #181818;
+    }
+    details.tx-toggle {
+      margin-top: 0.5rem;
+    }
+    details.tx-toggle summary {
+      cursor: pointer;
+      list-style: none;
+      font-weight: bold;
+    }
+    details.tx-toggle summary::-webkit-details-marker {
+      display: none;
+    }
+    details.tx-toggle summary::before {
+      content: "▶ ";
+      font-size: 0.75rem;
+    }
+    details.tx-toggle[open] summary::before {
+      content: "▼ ";
+    }
+    .tx-muted {
+      color: #aaa;
+      font-size: 0.8rem;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="tx-wrap">
+  <div class="tx-card">
+    <h1>IP Transcoder – Channel‑centric design (v3)</h1>
+    <p>
+      Each <strong>Channel</strong> defines everything in one place:
+      input, output, processing options, a weekly schedule, and optional
+      time‑shift playback. There are no separate schedule rows to manage.
+    </p>
+
+    
+    <details class="tx-toggle" open>
+      <summary>Record + Time‑shift (single mode)</summary>
+      <div class="tx-muted">
+        <p>
+          Each channel always records TS segments to disk according to its schedule.
+          If you also configure a <strong>time‑shift delay</strong> and
+          <strong>UDP output</strong>, the channel will output a delayed
+          MPEG‑TS stream from its own recordings.
+        </p>
+        <ul>
+          <li><strong>Delay:</strong> set <em>timeshift_delay_minutes</em> between 0 and 1440 minutes
+              (0 = as‑live, up to 24 hours behind).</li>
+          <li><strong>Output:</strong> set <em>timeshift_output_udp_url</em> to a unicast or multicast
+              MPEG‑TS address, e.g. <code>udp://239.0.0.10:2001?ttl=1&amp;pkt_size=1316</code>.</li>
+          <li><strong>Schedule:</strong> the weekly schedule controls when both recording and playback
+              jobs are running for this channel.</li>
+          <li><strong>Record‑only:</strong> if you leave <em>timeshift_delay_minutes</em> or
+              <em>timeshift_output_udp_url</em> blank, the channel will only record (no UDP playback).</li>
+        </ul>
+      </div>
+    </details>
+</div>
+
+  <div class="tx-card">
+    <h2>Configured channels</h2>
+    {% if channels %}
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Mode</th>
+            <th>Input</th>
+            <th>Output</th>
+            <th>Schedule</th>
+            <th>Recording</th>
+            <th>Time‑shift / Playback</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ch in channels %}
+            <tr>
+              <td><strong>{{ ch.name }}</strong></td>
+              <td>
+                {% if ch.enabled %}
+                  <span class="tx-pill">Enabled</span>
+                {% else %}
+                  <span class="tx-pill" style="background:#330;">Disabled</span>
+                {% endif %}
+              </td>
+              <td>
+                <div><strong>{{ ch.get_input_type_display }}</strong></div>
+                <div class="tx-muted">{{ ch.input_url }}</div>
+              </td>
+              <td>
+                <div><strong>{{ ch.get_output_type_display }}</strong></div>
+                <div class="tx-muted">{{ ch.output_target }}</div>
+              </td>
+              <td>
+                <div class="tx-muted">
+                  {% with days="" %}
+                    {% if ch.monday %}Mon {% endif %}
+                    {% if ch.tuesday %}Tue {% endif %}
+                    {% if ch.wednesday %}Wed {% endif %}
+                    {% if ch.thursday %}Thu {% endif %}
+                    {% if ch.friday %}Fri {% endif %}
+                    {% if ch.saturday %}Sat {% endif %}
+                    {% if ch.sunday %}Sun {% endif %}
+                  {% endwith %}
+                </div>
+                <div class="tx-muted">
+                  {% if ch.start_time and ch.end_time %}
+                    {{ ch.start_time|time:"H:i" }} – {{ ch.end_time|time:"H:i" }}
+                  {% else %}
+                    00:00 – 00:00 (full day)
+                  {% endif %}
+                </div>
+                <div class="tx-muted">
+                  Dates:
+                  {% if ch.date_from %}{{ ch.date_from }}{% else %}any{% endif %}
+                  →
+                  {% if ch.date_to %}{{ ch.date_to }}{% else %}any{% endif %}
+                </div>
+              </td>
+              <td>
+                {% if ch.auto_delete_enabled %}
+                  <div class="tx-muted">
+                    Auto delete after {{ ch.auto_delete_after_days }} days
+                  </div>
+                {% else %}
+                  <div class="tx-muted">Auto delete: disabled</div>
+                {% endif %}
+                <div class="tx-muted">
+                  Path template:<br>
+                  <code>{{ ch.recording_path_template }}</code>
+                </div>
+              </td>
+              <td>
+                <div class="tx-muted">
+                  Delay:
+                  {% if ch.timeshift_delay_minutes %}
+                    {{ ch.timeshift_delay_minutes }} min
+                  {% else %}
+                    –
+                  {% endif %}
+                </div>
+                <div class="tx-muted">
+                  UDP:
+                  {% if ch.timeshift_output_udp_url %}
+                    <code>{{ ch.timeshift_output_udp_url }}</code>
+                  {% else %}
+                    –
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="tx-muted">No channels defined yet. Use the Django admin to create one.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
