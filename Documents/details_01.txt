@@ -79,6 +79,8 @@ You can quickly verify:
 ls -lh media/test_media/
 
 | ------------------------------------------  /\/\/\/\  ------------------------------------------ |
+to start a multicat on Ubuntu to test:
+ffmpeg -re   -f lavfi -i testsrc=size=1280x720:rate=25   -f lavfi -i sine=frequency=1000:sample_rate=48000   -c:v libx264 -preset veryfast -tune zerolatency   -c:a aac -b:a 128k   -f mpegts "udp://239.10.10.10:5001?pkt_size=1316&ttl=1"
 
 | ------------------------------------------  /\/\/\/\  ------------------------------------------ |
 

@@ -1,107 +1,142 @@
-import subprocess
+# transcoder/management/commands/transcoder_enforcer.py
 import time
+import subprocess
+from pathlib import Path
 from typing import Dict, Tuple
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from transcoder.models import Channel
 from transcoder.ffmpeg_runner import FFmpegJobConfig
-from transcoder.models import Channel, JobPurpose
+from transcoder.retention import prune_channel_recordings
 
+PURPOSE_RECORD = "record"
+PURPOSE_PLAYBACK = "playback"
 JobKey = Tuple[str, int]  # (purpose, channel_id)
+
+LAST_PRUNE_AT = 0.0
+PRUNE_EVERY_SECONDS = 60  # run retention once per minute
 
 
 class Command(BaseCommand):
-    help = (
-        "Enforcer v3: starts/stops ffmpeg jobs based on each channel's schedule, "
-        "always recording and optionally running a time-shift playback if configured."
-    )
-
-    # How often to re-evaluate schedules and restart/stop ffmpeg (in seconds)
-    POLL_INTERVAL = 10
+    help = "Ensures ffmpeg jobs are running according to Channel schedule and settings."
 
     def handle(self, *args, **options):
+        self.stdout.write(self.style.SUCCESS("Starting transcoder enforcer..."))
+
         running: Dict[JobKey, subprocess.Popen] = {}
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                "Starting transcoder enforcer (v2, channel-centric scheduling)..."
-            )
-        )
+        logs_dir = Path(settings.MEDIA_ROOT) / "ffmpeg_logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             while True:
                 now = timezone.localtime()
 
-                # Collect active channels and decide which jobs we want
-                channels = list(Channel.objects.filter(enabled=True))
-                desired_jobs: Dict[JobKey, str] = {}  # key -> human description
+                channels = list(Channel.objects.all())
+                channel_by_id = {c.id: c for c in channels}
 
+                # -----------------------------
+                # Retention (auto-delete) throttle
+                # -----------------------------
+                global LAST_PRUNE_AT
+                t = time.time()
+                if t - LAST_PRUNE_AT >= PRUNE_EVERY_SECONDS:
+                    for chan in channels:
+                        if chan.auto_delete_enabled:
+                            stats = prune_channel_recordings(chan, dry_run=False)
+                            if stats["deleted"] > 0:
+                                self.stdout.write(
+                                    f"[retention] {chan.name}: deleted={stats['deleted']} "
+                                    f"protected_skips={stats['skipped_protected']} scanned={stats['scanned']}"
+                                )
+                    LAST_PRUNE_AT = t
+
+                # -----------------------------
+                # Compute desired jobs
+                # -----------------------------
+                desired_jobs: Dict[JobKey, str] = {}
 
                 for chan in channels:
-                    if not chan.is_active_now(now):
-                        continue
+                    # RECORD follows schedule strictly
+                    record_should_run = chan.record_enabled and chan.is_record_active_now(now)
 
-                    # Always run a RECORD job for active channels
-                    key_rec: JobKey = (JobPurpose.RECORD, chan.id)
-                    desired_jobs[key_rec] = f"{chan.name} [record]"
+                    # PLAYBACK follows schedule OR tail-window (if playback_tail_enabled)
+                    playback_should_run = chan.is_playback_active_now(now)
 
-                    # Optionally run a PLAYBACK job if time-shift is configured
-                    delay = getattr(chan, "timeshift_delay_minutes", None)
-                    udp = (getattr(chan, "timeshift_output_udp_url", "") or "").strip()
-                    if delay is not None and udp:
-                        key_play: JobKey = (JobPurpose.PLAYBACK, chan.id)
-                        desired_jobs[key_play] = f"{chan.name} [record+timeshift: playback]"
+                    if record_should_run:
+                        desired_jobs[(PURPOSE_RECORD, chan.id)] = f"{chan.name} [record]"
 
+                    if playback_should_run:
+                        desired_jobs[(PURPOSE_PLAYBACK, chan.id)] = f"{chan.name} [playback]"
 
+                # -----------------------------
+                # Stop jobs that are no longer desired
+                # -----------------------------
+                for key in list(running.keys()):
+                    if key not in desired_jobs:
+                        proc = running.pop(key)
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=5)
+                        except Exception:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+
+                # -----------------------------
                 # Start any missing desired jobs
-                for key, descr in desired_jobs.items():
-                    proc = running.get(key)
-                    if proc is not None and proc.poll() is None:
-                        # Still running and desired
-                        continue
+                # -----------------------------
+                for key, label in desired_jobs.items():
+                    if key in running:
+                        # if process died, clean it up so it can be restarted
+                        if running[key].poll() is not None:
+                            try:
+                                running[key].wait(timeout=0.2)
+                            except Exception:
+                                pass
+                            running.pop(key, None)
+                        else:
+                            continue
 
                     purpose, channel_id = key
-                    chan = next(c for c in channels if c.id == channel_id)
-                    job = FFmpegJobConfig(channel=chan, purpose=purpose)
-                    cmd = job.build_command()
+                    chan = channel_by_id.get(channel_id)
+                    if not chan:
+                        continue
 
-                    self.stdout.write(
-                        self.style.SUCCESS(f"Starting ffmpeg for {descr}: {' '.join(cmd)}")
-                    )
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    running[key] = proc
+                    try:
+                        job = FFmpegJobConfig(channel=chan, purpose=purpose)
+                        cmd = job.build_command()
 
-                # Stop jobs that are no longer desired
-                for key, proc in list(running.items()):
-                    if key not in desired_jobs:
-                        if proc.poll() is None:
-                            purpose, channel_id = key
-                            self.stdout.write(
-                                self.style.WARNING(
-                                    f"Stopping ffmpeg for channel_id={channel_id}, purpose={purpose} "
-                                    "(no longer desired)..."
-                                )
-                            )
-                            proc.terminate()
-                        del running[key]
+                        safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in chan.name)
+                        log_path = logs_dir / f"{safe_name}_{purpose}.log"
+                        log_f = open(log_path, "a", buffering=1)
 
-                time.sleep(self.POLL_INTERVAL)
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdout=log_f,
+                            stderr=log_f,
+                            text=True,
+                        )
+                        running[key] = proc
+                        self.stdout.write(self.style.SUCCESS(f"Started {label} (pid={proc.pid})"))
+                    except Exception as e:
+                        self.stdout.write(self.style.ERROR(f"Failed to start {label}: {e}"))
+
+                time.sleep(5)
 
         except KeyboardInterrupt:
-            self.stdout.write(self.style.WARNING("Enforcer stopping (Ctrl+C)..."))
-            for key, proc in running.items():
-                if proc.poll() is None:
-                    purpose, channel_id = key
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f"Terminating ffmpeg for channel_id={channel_id}, purpose={purpose}..."
-                        )
-                    )
+            self.stdout.write(self.style.WARNING("Stopping enforcer..."))
+        finally:
+            for proc in running.values():
+                try:
                     proc.terminate()
-            self.stdout.write(self.style.SUCCESS("Enforcer stopped."))
-
+                    proc.wait(timeout=3)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass

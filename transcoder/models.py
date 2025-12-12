@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
+from django.core.validators import MaxValueValidator
 import datetime
+from datetime import timedelta
 
 
 class InputType(models.TextChoices):
@@ -11,9 +13,9 @@ class InputType(models.TextChoices):
 
 
 class OutputType(models.TextChoices):
+    UDP_TS = "udp_ts", "UDP TS Unicast"
     HLS = "hls", "HLS (m3u8)"
     RTMP = "rtmp", "RTMP"
-    UDP_TS = "udp_ts", "UDP TS Unicast"
     FILE_TS = "file_ts", "File (TS)"
     FILE_MP4 = "file_mp4", "File (MP4)"
 
@@ -36,18 +38,12 @@ class HardwarePreference(models.TextChoices):
     CPU = "cpu", "Force CPU"
 
 
-class JobPurpose(models.TextChoices):
-    LIVE_FORWARD = "live_forward", "Live forward"
-    RECORD = "record", "Record"
-    # Later we can add: PLAYBACK = "playback", "Playback (from recording)"
-    PLAYBACK = "playback", "Playback (delayed)"
-
-
-
 class Channel(models.Model):
     """
-    One logical source (multicast, RTSP, RTMP, file) and how we handle it.
-    Copy/remux by default; transcoding only when explicitly enabled.
+    v3 baseline:
+    - Single mode: Record + Time-shift (delayed playback) with ONE output URL.
+    - Recording writes .ts segments to disk.
+    - Output restreams from recorded segments according to delay_seconds (0..24h).
     """
     name = models.CharField(max_length=100, unique=True)
     enabled = models.BooleanField(default=True)
@@ -67,17 +63,36 @@ class Channel(models.Model):
         help_text="Optional: e.g. eth0. Leave blank to use system default.",
     )
 
-    # Output
-    output_type = models.CharField(max_length=20, choices=OutputType.choices)
-    output_target = models.CharField(
+    # Output (ONE target only)
+    output_type = models.CharField(
+        max_length=20,
+        choices=OutputType.choices,
+        default=OutputType.UDP_TS,
+    )
+    output_url = models.CharField(
         max_length=512,
-        help_text="For HLS: directory path; for RTMP/UDP: URL (udp://ip:port, rtmp://...).",
+        help_text="For UDP/RTMP: URL (udp://ip:port, rtmp://...). For HLS: directory path.",
+    )
+
+    # Time-shift delay (0..86400 seconds = 24 hours)
+    delay_seconds = models.PositiveIntegerField(
+        default=0,
+        validators=[MaxValueValidator(24 * 3600)],
+        help_text="0 = no delay. Max 86400 seconds (24 hours).",
+    )
+
+    playback_tail_enabled = models.BooleanField(
+        default=False,
+        help_text=(
+            "If enabled: when schedule ends, recording stops immediately but playback continues "
+            "until (schedule_end + delay_seconds). Useful to flush the delayed buffer."
+        ),
     )
 
     # Recording settings
     record_enabled = models.BooleanField(
         default=True,
-        help_text="If on, we are allowed to record this channel to disk.",
+        help_text="If on, the channel records TS segments to disk (required for time-shift).",
     )
     recording_path_template = models.CharField(
         max_length=512,
@@ -92,7 +107,7 @@ class Channel(models.Model):
         help_text="Length of each recording segment in minutes.",
     )
 
-
+    # Auto-delete (segments and/or days)
     auto_delete_enabled = models.BooleanField(
         default=False,
         help_text=(
@@ -117,14 +132,9 @@ class Channel(models.Model):
         ),
     )
 
-
-    # Codec / processing – copy by default
-    video_mode = models.CharField(
-        max_length=16, choices=VideoMode.choices, default=VideoMode.COPY
-    )
-    audio_mode = models.CharField(
-        max_length=16, choices=AudioMode.choices, default=AudioMode.COPY
-    )
+    # Codec / processing – copy by default (CPU-only is your target, but we keep the fields)
+    video_mode = models.CharField(max_length=16, choices=VideoMode.choices, default=VideoMode.COPY)
+    audio_mode = models.CharField(max_length=16, choices=AudioMode.choices, default=AudioMode.COPY)
 
     video_codec = models.CharField(
         max_length=16,
@@ -140,25 +150,15 @@ class Channel(models.Model):
     hardware_preference = models.CharField(
         max_length=16,
         choices=HardwarePreference.choices,
-        default=HardwarePreference.AUTO,
-        help_text="AUTO = NVIDIA → Intel → CPU; or force one.",
+        default=HardwarePreference.CPU,  # v3: CPU-only baseline
+        help_text="v3 baseline is CPU-only. Keep this field for future flexibility.",
     )
 
-    # Transcoding constraints (only if video_mode=TRANSCODE)
-    target_width = models.PositiveIntegerField(
-        null=True, blank=True, help_text="E.g. 1920. If null, keep source width."
-    )
-    target_height = models.PositiveIntegerField(
-        null=True, blank=True, help_text="E.g. 1080. If null, keep source height."
-    )
-    video_bitrate = models.CharField(
-        max_length=16,
-        blank=True,
-        help_text="E.g. 4000k. If blank, FFmpeg decides.",
-    )
+    target_width = models.PositiveIntegerField(null=True, blank=True, help_text="E.g. 1920. If null, keep source.")
+    target_height = models.PositiveIntegerField(null=True, blank=True, help_text="E.g. 1080. If null, keep source.")
+    video_bitrate = models.CharField(max_length=16, blank=True, help_text="E.g. 4000k. If blank, FFmpeg decides.")
 
-
-    # Simple weekly schedule attached directly to the channel
+    # Weekly schedule directly on Channel
     monday = models.BooleanField(default=True)
     tuesday = models.BooleanField(default=True)
     wednesday = models.BooleanField(default=True)
@@ -172,7 +172,7 @@ class Channel(models.Model):
         blank=True,
         help_text=(
             "Local start time (HH:MM). "
-            "If Start time and End time are both set to 00:00, the channel runs for the entire day."
+            "If start_time == end_time, the channel runs the full day on selected weekdays."
         ),
     )
     end_time = models.TimeField(
@@ -180,43 +180,13 @@ class Channel(models.Model):
         blank=True,
         help_text=(
             "Local end time (HH:MM). "
-            "If earlier than Start time, the channel runs overnight. "
-            "If Start time and End time are both set to 00:00, the channel runs for the entire day."
+            "If earlier than start_time, the channel runs overnight."
         ),
     )
 
-    date_from = models.DateField(
-        null=True,
-        blank=True,
-        help_text="Optional: only apply from this date (inclusive).",
-    )
-    date_to = models.DateField(
-        null=True,
-        blank=True,
-        help_text="Optional: only apply up to this date (inclusive).",
-    )
+    date_from = models.DateField(null=True, blank=True, help_text="Optional: only apply from this date (inclusive).")
+    date_to = models.DateField(null=True, blank=True, help_text="Optional: only apply up to this date (inclusive).")
 
-    # Recording retention / auto-delete settings
-    auto_delete_enabled = models.BooleanField(
-        default=False,
-        help_text="If enabled, old recordings will be automatically deleted based on 'auto_delete_after_days'.",
-    )
-    auto_delete_after_days = models.PositiveIntegerField(
-        default=7,
-        help_text="Delete recordings older than this many days.",
-    )
-
-    # Optional time-shift configuration stored directly on the channel
-    timeshift_delay_minutes = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Delay in minutes for time-shift playback. Used when mode is 'Record + Time-shift' or 'Playback from recordings'.",
-    )
-    timeshift_output_udp_url = models.CharField(
-        max_length=512,
-        blank=True,
-        help_text="UDP TS URL for delayed output, e.g. udp://239.0.0.10:2001?ttl=1&pkt_size=1316",
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -226,17 +196,16 @@ class Channel(models.Model):
     def __str__(self) -> str:
         return self.name
 
-
     def is_active_now(self, now: datetime.datetime | None = None) -> bool:
         """
         Check if this channel should be active at the given 'now' (local time)
         based on its built-in weekly schedule.
 
-        Semantics (same as RecurringSchedule):
-        - If start_time == end_time (and not null)  -> active the FULL day for selected weekdays.
-        - If start_time < end_time                  -> active between start and end on the same day.
-        - If start_time > end_time                  -> overnight window (e.g. 20:00 -> 06:00 next day).
-        - If start_time or end_time is null         -> treated as 00:00.
+        Semantics:
+        - If start_time == end_time (and not null) -> active full day for selected weekdays
+        - If start_time < end_time                 -> active between start and end same day
+        - If start_time > end_time                 -> overnight window (e.g. 20:00 -> 06:00)
+        - If start_time or end_time is null        -> treated as 00:00
         """
         if not self.enabled:
             return False
@@ -246,249 +215,127 @@ class Channel(models.Model):
 
         local_date = now.date()
         local_time = now.time()
-        weekday = now.weekday()  # Monday=0, Sunday=6
+        weekday = now.weekday()  # Mon=0..Sun=6
 
-        # Use 00:00 as default if times are not set
         start_time = self.start_time or datetime.time(0, 0)
         end_time = self.end_time or datetime.time(0, 0)
 
-        # Date range check
         if self.date_from and local_date < self.date_from:
             return False
         if self.date_to and local_date > self.date_to:
             return False
 
-        # Weekday check via booleans (note: weekday() is Mon=0..Sun=6)
         weekday_flags = [
-            self.monday,    # 0
-            self.tuesday,   # 1
-            self.wednesday, # 2
-            self.thursday,  # 3
-            self.friday,    # 4
-            self.saturday,  # 5
-            self.sunday,    # 6
+            self.monday,
+            self.tuesday,
+            self.wednesday,
+            self.thursday,
+            self.friday,
+            self.saturday,
+            self.sunday,
         ]
         if not weekday_flags[weekday]:
             return False
 
-        # Time window semantics
         if start_time == end_time:
-            # Full-day: active 24 hours for the selected weekdays
             return True
 
         if start_time < end_time:
-            # Normal daytime window: e.g. 08:00 -> 20:00
             return start_time <= local_time < end_time
         else:
-            # Overnight window: e.g. 20:00 -> 06:00
             return (local_time >= start_time) or (local_time < end_time)
 
-class Schedule(models.Model):
-    """
-    One scheduled job for a channel:
-    - LIVE_FORWARD: take input and restream (e.g. to HLS/RTMP/UDP)
-    - RECORD: take input and save to disk
-    For now: simple one-off schedule with start/end datetimes.
-    """
-    name = models.CharField(max_length=100)
-    channel = models.ForeignKey(
-        Channel,
-        on_delete=models.CASCADE,
-        related_name="schedules",
-    )
-    purpose = models.CharField(
-        max_length=16,
-        choices=JobPurpose.choices,
-        default=JobPurpose.LIVE_FORWARD,
-    )
-
-    enabled = models.BooleanField(default=True)
-
-    start_at = models.DateTimeField(
-        help_text="When this job should start (server/local time)."
-    )
-    end_at = models.DateTimeField(
-        help_text="When this job should stop (server/local time)."
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-start_at"]
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.channel.name})"
-
-
-class RecurringSchedule(models.Model):
-    """
-    Weekly recurring schedule.
-    Example: record Channel A every Sat–Fri from 00:00 to 23:59, between date_from and date_to.
-    """
-    name = models.CharField(max_length=100)
-    channel = models.ForeignKey(
-        Channel,
-        on_delete=models.CASCADE,
-        related_name="recurring_schedules",
-    )
-    purpose = models.CharField(
-        max_length=16,
-        choices=JobPurpose.choices,
-        default=JobPurpose.RECORD,
-    )
-
-    enabled = models.BooleanField(default=True)
-
-    # Weekday checkboxes – logical semantics are the same,
-    # but we'll display them Sat→Fri in admin.
-    monday = models.BooleanField(default=True)
-    tuesday = models.BooleanField(default=True)
-    wednesday = models.BooleanField(default=True)
-    thursday = models.BooleanField(default=True)
-    friday = models.BooleanField(default=True)
-    saturday = models.BooleanField(default=True)
-    sunday = models.BooleanField(default=True)
-
-    start_time = models.TimeField(
-        help_text=(
-            "Local start time (HH:MM). "
-            "If Start time and End time are both set to 00:00, the schedule runs for the entire day."
-        )
-    )
-
-    end_time = models.TimeField(
-        help_text=(
-            "Local end time (HH:MM). "
-            "If later than Start time, the schedule runs within the same day. "
-            "If earlier than Start time, the schedule runs overnight. "
-            "If Start time and End time are both set to 00:00, the schedule runs for the entire day."
-        )
-    )
-
-    date_from = models.DateField(
-        null=True,
-        blank=True,
-        help_text="Optional: only apply from this date (inclusive).",
-    )
-    date_to = models.DateField(
-        null=True,
-        blank=True,
-        help_text="Optional: only apply up to this date (inclusive).",
-    )
-
-    # auto add & read-only (via admin): creation timestamp
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["name"]
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.channel.name})"
-
-    def weekdays_text(self) -> str:
+    def is_record_active_now(self, now=None) -> bool:
         """
-        Human-readable summary of which days are enabled, in Sat→Fri order.
+        Recording follows schedule strictly.
         """
-        parts = []
-        if self.saturday:
-            parts.append("Sat")
-        if self.sunday:
-            parts.append("Sun")
-        if self.monday:
-            parts.append("Mon")
-        if self.tuesday:
-            parts.append("Tue")
-        if self.wednesday:
-            parts.append("Wed")
-        if self.thursday:
-            parts.append("Thu")
-        if self.friday:
-            parts.append("Fri")
-        return ", ".join(parts) if parts else "—"
+        return self.is_active_now(now=now)
 
-    weekdays_text.short_description = "Days"
-
-    def is_active_now(self, now: datetime.datetime) -> bool:
+    def is_playback_active_now(self, now=None) -> bool:
         """
-        Check if this recurring schedule should be active at the given 'now' (local time).
-
-        Semantics:
-        - If start_time == end_time  -> active the FULL day for selected weekdays.
-        - If start_time < end_time   -> active between start and end on the same day.
-        - If start_time > end_time   -> overnight window (e.g. 20:00 -> 06:00 next day).
+        Playback is active if:
+        - schedule is active now, OR
+        - playback_tail_enabled and we're within (last_schedule_end + delay_seconds)
         """
         if not self.enabled:
             return False
 
-        local_date = now.date()
-        local_time = now.time()
-        weekday = now.weekday()  # Monday=0, Sunday=6
+        if now is None:
+            now = timezone.localtime()
 
-        # Date range check
-        if self.date_from and local_date < self.date_from:
-            return False
-        if self.date_to and local_date > self.date_to:
-            return False
-
-        # Weekday check via booleans (note: weekday() is Mon=0..Sun=6)
-        weekday_flags = [
-            self.monday,  # 0
-            self.tuesday,  # 1
-            self.wednesday,  # 2
-            self.thursday,  # 3
-            self.friday,  # 4
-            self.saturday,  # 5
-            self.sunday,  # 6
-        ]
-        if not weekday_flags[weekday]:
-            return False
-
-        # Time window semantics
-        if self.start_time == self.end_time:
-            # Full-day: active 24 hours for the selected weekdays
+        # If schedule is currently active -> playback should run
+        if self.is_active_now(now=now):
             return True
 
-        if self.start_time < self.end_time:
-            # Normal daytime window: e.g. 08:00 -> 20:00
-            return self.start_time <= local_time < self.end_time
-        else:
-            # Overnight window: e.g. 20:00 -> 06:00
-            return (local_time >= self.start_time) or (local_time < self.end_time)
+        # If no tail -> stop playback when schedule stops
+        if not self.playback_tail_enabled:
+            return False
 
+        # If delay is 0 -> tail doesn't matter
+        if not self.delay_seconds:
+            return False
 
-class TimeShiftProfile(models.Model):
-    """
-    Configuration for a delayed (time-shifted) output for a channel.
-    This defines:
-      - how much delay (in minutes)
-      - where to restream (udp_ts URL)
-    Playback logic will read this config.
-    """
-    channel = models.OneToOneField(
-        Channel,
-        on_delete=models.CASCADE,
-        related_name="timeshift_profile",
-    )
-    enabled = models.BooleanField(default=False)
+        last_end = self._most_recent_schedule_end_dt(now)
+        if not last_end:
+            return False
 
-    delay_minutes = models.PositiveIntegerField(
-        default=180,
-        help_text="Delay between live input and delayed output, in minutes (e.g. 180 = 3 hours).",
-    )
+        return now <= (last_end + timedelta(seconds=int(self.delay_seconds)))
 
-    output_udp_url = models.CharField(
-        max_length=512,
-        help_text="UDP TS URL for delayed output, e.g. udp://239.0.0.10:2001?ttl=1&pkt_size=1316",
-    )
+    def _most_recent_schedule_end_dt(self, now):
+        """
+        Find the most recent schedule end datetime that is <= now.
+        Works for same-day and overnight windows.
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+        We search backward up to 8 days to find the latest end moment.
+        """
+        # If start==end -> full-day schedule, no "end moment" tail concept
+        start_time = self.start_time or datetime.time(0, 0)
+        end_time = self.end_time or datetime.time(0, 0)
+        if start_time == end_time:
+            return None
 
-    class Meta:
-        verbose_name = "Time-shift profile"
-        verbose_name_plural = "Time-shift profiles"
+        # Helper: weekday enabled?
+        weekday_flags = [
+            self.monday,
+            self.tuesday,
+            self.wednesday,
+            self.thursday,
+            self.friday,
+            self.saturday,
+            self.sunday,
+        ]
 
-    def __str__(self) -> str:
-        return f"TimeShift({self.channel.name}, {self.delay_minutes} min)"
+        best_end = None
+        today = now.date()
+
+        # We iterate start-days backward; for overnight schedules,
+        # end is on the next day morning.
+        for delta_days in range(0, 8):
+            start_day = today - datetime.timedelta(days=delta_days)
+
+            # date_from/date_to apply to the "start_day" of the scheduled window
+            if self.date_from and start_day < self.date_from:
+                continue
+            if self.date_to and start_day > self.date_to:
+                continue
+
+            if not weekday_flags[start_day.weekday()]:
+                continue
+
+            # Compute end datetime for the window starting on start_day
+            if start_time < end_time:
+                # Same-day window: start_day start -> start_day end
+                end_dt = datetime.datetime.combine(start_day, end_time)
+            else:
+                # Overnight window: start_day start -> (start_day + 1) end
+                end_dt = datetime.datetime.combine(start_day + datetime.timedelta(days=1), end_time)
+
+            # Make it timezone-aware in the same zone as `now`
+            # If your project runs with USE_TZ=False, this still behaves fine because now is localtime().
+            if timezone.is_naive(end_dt) and not timezone.is_naive(now):
+                end_dt = timezone.make_aware(end_dt, timezone.get_current_timezone())
+
+            if end_dt <= now and (best_end is None or end_dt > best_end):
+                best_end = end_dt
+
+        return best_end

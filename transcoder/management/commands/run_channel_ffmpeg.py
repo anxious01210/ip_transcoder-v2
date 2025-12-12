@@ -1,38 +1,69 @@
+# transcoder/management/commands/run_channel_ffmpeg.py
+import os
+import shutil
 import subprocess
-from django.core.management.base import BaseCommand, CommandError
 
+from django.core.management.base import BaseCommand, CommandError
 from transcoder.ffmpeg_runner import FFmpegJobConfig
 from transcoder.models import Channel
 
 
 class Command(BaseCommand):
-    help = "Run a single ffmpeg job for a channel (live_forward, record, or playback)."
+    help = "Run ffmpeg for a single channel (v3): record or playback."
 
     def add_arguments(self, parser):
         parser.add_argument("channel_id", type=int)
         parser.add_argument(
             "--purpose",
-            choices=["live_forward", "record", "playback"],
-            default="live_forward",
-            help="Type of job to run: live_forward, record, or playback.",
+            default="record",
+            choices=["record", "playback"],
+            help="Job purpose: record or playback (default: record)",
         )
 
     def handle(self, *args, **options):
         channel_id = options["channel_id"]
         purpose = options["purpose"]
 
+        if shutil.which("ffmpeg") is None:
+            raise CommandError("ffmpeg not found in PATH. Install ffmpeg or add it to PATH.")
+
         try:
             chan = Channel.objects.get(pk=channel_id)
         except Channel.DoesNotExist:
-            raise CommandError(f"Channel with id={channel_id} does not exist.")
+            raise CommandError(f"Channel id={channel_id} not found.")
 
         job = FFmpegJobConfig(channel=chan, purpose=purpose)
-        cmd_list = job.build_command()
+        cmd = job.build_command()
 
-        self.stdout.write(f"Running FFmpeg:\n{' '.join(cmd_list)}")
+        self.stdout.write(self.style.SUCCESS("Running FFmpeg:"))
+        self.stdout.write(" ".join(cmd))
+        self.stdout.flush()
 
-        import subprocess
-        proc = subprocess.Popen(cmd_list)
-        proc.wait()
+        # Run FFmpeg and stream output to terminal
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception as e:
+            raise CommandError(f"Failed to start ffmpeg: {e}")
 
-        self.stdout.write("FFmpeg stopped.")
+        try:
+            for line in proc.stdout:
+                self.stdout.write(line.rstrip("\n"))
+        except KeyboardInterrupt:
+            self.stdout.write(self.style.WARNING("Stopping FFmpeg (Ctrl+C)..."))
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        finally:
+            rc = proc.wait()
+            if rc == 0:
+                self.stdout.write(self.style.SUCCESS("FFmpeg exited normally."))
+            else:
+                self.stdout.write(self.style.ERROR(f"FFmpeg exited with code {rc}."))
