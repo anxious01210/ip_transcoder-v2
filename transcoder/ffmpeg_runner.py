@@ -1,210 +1,243 @@
+# transcoder/ffmpeg_runner.py
+import re
 import shlex
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from django.conf import settings
 from django.utils import timezone
 
-from .models import Channel, VideoMode, AudioMode
-from datetime import datetime, timedelta
-import tempfile
-
-PLAYBACK_PLAYLIST_WINDOW_SECONDS = 3 * 3600  # configurable
+from .models import AudioMode, Channel, TimeShiftProfile, VideoMode
 
 
 @dataclass
 class FFmpegJobConfig:
     channel: Channel
-    purpose: str  # "record" | "playback"
+    purpose: str  # "record" or "playback"
 
-    # -------------------------------------------------
-    # RECORDING
-    # -------------------------------------------------
-    def _resolve_input_url_for_record(self) -> str:
-        chan = self.channel
-        raw_input_url = chan.input_url
-
-        if chan.input_type == "file":
-            p = Path(raw_input_url)
-            if not p.is_absolute():
-                p = Path(settings.MEDIA_ROOT) / p
-            return str(p)
-
-        if chan.input_type == "udp_multicast":
-            if "fifo_size=" not in raw_input_url:
-                sep = "&" if "?" in raw_input_url else "?"
-                return f"{raw_input_url}{sep}fifo_size=1000000&overrun_nonfatal=1"
-            return raw_input_url
-
-        return raw_input_url
-
-    def _build_record_output(self, args: List[str]) -> None:
-        chan = self.channel
-        now = datetime.now()
-        date_str = now.strftime("%Y%m%d")
-
-        base_dir = Path(
-            chan.recording_path_template.format(
-                channel=chan.name,
-                date=date_str,
-                time=now.strftime("%H%M%S"),
-            )
-        )
-        if not base_dir.is_absolute():
-            base_dir = Path(settings.MEDIA_ROOT) / base_dir
-
-        base_dir.mkdir(parents=True, exist_ok=True)
-
-        args += [
-            "-f", "segment",
-            "-segment_time", str(chan.recording_segment_minutes * 60),
-            "-reset_timestamps", "1",
-            "-strftime", "1",
-            str(base_dir / f"{chan.name}_%Y%m%d-%H%M%S.ts"),
-        ]
-
-    # -------------------------------------------------
-    # PLAYBACK HELPERS
-    # -------------------------------------------------
-    def _parse_ts(self, path: Path) -> datetime | None:
-        prefix = f"{self.channel.name}_"
-        if not path.stem.startswith(prefix):
-            return None
-        try:
-            return datetime.strptime(path.stem[len(prefix):], "%Y%m%d-%H%M%S")
-        except ValueError:
-            return None
-
-    def _find_start_segment(self, delay_seconds: int) -> Path | None:
-        target = (timezone.localtime() - timedelta(seconds=delay_seconds)).replace(tzinfo=None)
-
-        root_tpl = self.channel.recording_path_template.format(
-            channel=self.channel.name, date="*", time="*"
-        )
-        root = Path(root_tpl)
-        if not root.is_absolute():
-            root = Path(settings.MEDIA_ROOT) / root
-
-        candidates: list[tuple[datetime, Path]] = []
-
-        for p in root.glob(f"{self.channel.name}_*.ts"):
-            ts = self._parse_ts(p)
-            if ts:
-                candidates.append((ts, p))
-
-        if not candidates:
-            return None
-
-        candidates.sort(key=lambda x: x[0])
-
-        chosen = candidates[0][1]
-        for ts, p in candidates:
-            if ts <= target:
-                chosen = p
-            else:
-                break
-        return chosen
-
-    def _collect_segments(self, start_file: Path) -> list[Path]:
-        chan = self.channel
-        seg_len = max(1, chan.recording_segment_minutes * 60)
-        max_files = int(PLAYBACK_PLAYLIST_WINDOW_SECONDS // seg_len) + 2
-
-        root_tpl = chan.recording_path_template.format(
-            channel=chan.name, date="*", time="*"
-        )
-        root = Path(root_tpl)
-        if not root.is_absolute():
-            root = Path(settings.MEDIA_ROOT) / root
-
-        segs: list[tuple[datetime, Path]] = []
-        for p in root.glob(f"{chan.name}_*.ts"):
-            ts = self._parse_ts(p)
-            if ts:
-                segs.append((ts, p))
-
-        segs.sort(key=lambda x: x[0])
-
-        started = False
-        out: list[Path] = []
-        for ts, p in segs:
-            if not started:
-                if p == start_file:
-                    started = True
-                else:
-                    continue
-            if p.exists():
-                out.append(p)
-            if len(out) >= max_files:
-                break
-
-        return out
-
-    def _write_playlist(self, segs: list[Path]) -> Path:
-        tmp_dir = Path(settings.MEDIA_ROOT) / "tmp_playlists"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        with tempfile.NamedTemporaryFile(
-                "w", delete=False, dir=tmp_dir, suffix=".txt"
-        ) as f:
-            for p in segs:
-                f.write(f"file '{p}'\n")
-            return Path(f.name)
-
-    # -------------------------------------------------
-    # COMMAND BUILDER
-    # -------------------------------------------------
     def build_command(self) -> List[str]:
+        """
+        Build an ffmpeg command for this channel & purpose.
+
+        - record:
+            Reads from channel.input_* and writes TS segments under MEDIA_ROOT.
+        - playback:
+            Reads from recorded TS segments (concat playlist window) and outputs delayed UDP TS to channel.output_target.
+            The playlist is finite; enforcer restarts playback after it exits, keeping it continuous.
+        """
         chan = self.channel
         args: List[str] = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
 
+        # ------------------------
+        # RECORD
+        # ------------------------
         if self.purpose == "record":
-            args += ["-i", self._resolve_input_url_for_record()]
+            args += self._build_live_input_args()
 
-            args += ["-c:v", "copy" if chan.video_mode == VideoMode.COPY else (chan.video_codec or "libx264")]
+            is_internal_gen = (chan.input_type == "internal_gen")
 
-            if chan.audio_mode == AudioMode.COPY:
+            # Video codec
+            if (not is_internal_gen) and chan.video_mode == VideoMode.COPY:
+                args += ["-c:v", "copy"]
+            else:
+                args += ["-c:v", chan.video_codec or "libx264"]
+                if is_internal_gen:
+                    args += ["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"]
+
+            # Audio codec
+            if (not is_internal_gen) and chan.audio_mode == AudioMode.COPY:
                 args += ["-c:a", "copy"]
             elif chan.audio_mode == AudioMode.DISABLE:
                 args += ["-an"]
             else:
                 args += ["-c:a", chan.audio_codec or "aac"]
+                if is_internal_gen:
+                    args += ["-b:a", "128k", "-ac", "2"]
 
             self._build_record_output(args)
             return args
 
+        # ------------------------
+        # PLAYBACK
+        # ------------------------
         if self.purpose == "playback":
-            delay = int(chan.delay_seconds or 0)
-            if not chan.output_url:
-                raise ValueError("output_url is required for playback")
+            profile: Optional[TimeShiftProfile] = getattr(chan, "timeshift_profile", None)
+            if not profile or not getattr(profile, "enabled", False):
+                raise ValueError("Time-shift profile is not enabled for this channel.")
 
-            start = self._find_start_segment(delay)
-            if not start:
-                raise FileNotFoundError("No recorded segments available yet")
+            if chan.output_type != "udp_ts" or not (chan.output_target or "").strip():
+                raise ValueError("Channel output must be UDP TS and output_target must be set for playback.")
 
-            segs = self._collect_segments(start)
-            if not segs:
-                raise FileNotFoundError("Not enough segments for playback yet")
+            delay_minutes = int(profile.delay_minutes or 0)
+            if delay_minutes <= 0:
+                raise ValueError("delay_minutes must be > 0 for playback.")
 
-            playlist = self._write_playlist(segs)
+            output_udp_url = (chan.output_target or "").strip()
+
+            playlist_path = self._build_playback_concat_playlist(delay_minutes)
 
             args += [
                 "-re",
                 "-f", "concat",
                 "-safe", "0",
-                "-i", str(playlist),
+                "-i", str(playlist_path),
                 "-c:v", "copy",
                 "-c:a", "copy",
                 "-f", "mpegts",
-                chan.output_url,
+                output_udp_url,
             ]
             return args
 
-        raise ValueError(f"Unsupported purpose: {self.purpose}")
+        raise ValueError(f"Unknown purpose: {self.purpose!r}")
 
+    # ------------------------
+    # Inputs
+    # ------------------------
+    def _build_live_input_args(self) -> List[str]:
+        """
+        Build ffmpeg input arguments for recording.
 
-def build_ffmpeg_cmd_for_channel(channel_id: int, purpose: str = "record") -> str:
-    chan = Channel.objects.get(pk=channel_id)
-    job = FFmpegJobConfig(channel=chan, purpose=purpose)
-    return " ".join(shlex.quote(p) for p in job.build_command())
+        - FILE: relative paths resolved under MEDIA_ROOT
+        - UDP multicast: adds fifo_size/overrun tuning if missing
+        - RTSP/RTMP: used as-is
+        - INTERNAL_GENERATOR: lavfi test bars + sine tone (works everywhere)
+        """
+        chan = self.channel
+        raw_input_url = (chan.input_url or "").strip()
+
+        if chan.input_type == "internal_gen":
+            return [
+                "-re",
+                "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25",
+                "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000",
+                "-shortest",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+            ]
+
+        if chan.input_type == "file":
+            in_path = Path(raw_input_url)
+            if not in_path.is_absolute():
+                in_path = Path(settings.MEDIA_ROOT) / in_path
+            return ["-i", str(in_path)]
+
+        if chan.input_type == "udp_multicast":
+            input_url = raw_input_url
+            if "fifo_size=" not in input_url:
+                sep = "&" if "?" in input_url else "?"
+                input_url = f"{input_url}{sep}fifo_size=1000000&overrun_nonfatal=1"
+            return ["-i", input_url]
+
+        return ["-i", raw_input_url]
+
+    # ------------------------
+    # Record output
+    # ------------------------
+    def _build_record_output(self, args: List[str]) -> None:
+        """
+        Write TS segments under MEDIA_ROOT with timestamped filenames.
+        Example: ChannelName_YYYYMMDD-HHMMSS.ts
+        """
+        chan = self.channel
+        now = datetime.now()
+        date_str = now.strftime("%Y%m%d")
+
+        base_dir_str = chan.recording_path_template.format(
+            channel=chan.name,
+            date=date_str,
+            time=now.strftime("%H%M%S"),
+        )
+        base_dir = Path(base_dir_str)
+        if not base_dir.is_absolute():
+            base_dir = Path(settings.MEDIA_ROOT) / base_dir
+
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        segment_seconds = chan.recording_segment_minutes * 60
+        segment_pattern = str(base_dir / f"{chan.name}_%Y%m%d-%H%M%S.ts")
+
+        args += [
+            "-f", "segment",
+            "-segment_time", str(segment_seconds),
+            "-reset_timestamps", "1",
+            "-strftime", "1",
+            segment_pattern,
+        ]
+
+    # ------------------------
+    # Playback playlist builder
+    # ------------------------
+    def _iter_recording_segments(self) -> List[Tuple[datetime, Path]]:
+        """
+        Return a sorted list of (timestamp, path) for TS segments for this channel.
+        Timestamp is parsed from filenames like: <channel>_YYYYMMDD-HHMMSS.ts
+        Falls back to mtime if parsing fails.
+        """
+        chan = self.channel
+
+        tmpl = chan.recording_path_template
+        try:
+            root_str = tmpl.format(channel=chan.name, date="", time="")
+        except Exception:
+            root_str = tmpl
+
+        root = Path(root_str)
+        if not root.is_absolute():
+            root = Path(settings.MEDIA_ROOT) / root
+
+        if not root.exists():
+            root = Path(settings.MEDIA_ROOT) / "recordings" / chan.name
+
+        candidates = list(root.glob("**/*.ts"))
+        items: List[Tuple[datetime, Path]] = []
+
+        rx = re.compile(rf"^{re.escape(chan.name)}_(\d{{8}})-(\d{{6}})\.ts$")
+
+        for p in candidates:
+            ts = None
+            m = rx.match(p.name)
+            if m:
+                try:
+                    ts = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+                except Exception:
+                    ts = None
+            if ts is None:
+                ts = datetime.fromtimestamp(p.stat().st_mtime)
+            items.append((ts, p))
+
+        items.sort(key=lambda x: x[0])
+        return items
+
+    def _build_playback_concat_playlist(self, delay_minutes: int) -> Path:
+        """
+        Build a finite concat playlist window around the delayed timestamp.
+        Enforcer will restart playback after it exits, which keeps playback continuous.
+        """
+        window_seconds = int(getattr(settings, "PLAYBACK_PLAYLIST_WINDOW_SECONDS", 3 * 3600))
+
+        # localtime -> make naive for filename timestamps
+        now = timezone.localtime().replace(tzinfo=None)
+        target = now - timedelta(minutes=delay_minutes)
+
+        start_ts = target - timedelta(seconds=window_seconds)
+        end_ts = target + timedelta(seconds=window_seconds)
+
+        segments = self._iter_recording_segments()
+        chosen = [p for (ts, p) in segments if (ts >= start_ts and ts <= end_ts)]
+
+        if not chosen:
+            raise FileNotFoundError(
+                f"No TS segments found for playback yet for channel {self.channel.name!r} "
+                f"(delay={delay_minutes}m, window={window_seconds}s). "
+                f"Recording may still be warming up; enforcer will retry."
+            )
+
+        out_dir = Path(settings.MEDIA_ROOT) / "playlists" / f"channel_{self.channel.id}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        playlist_path = out_dir / "concat.txt"
+
+        lines = [f"file {shlex.quote(str(p))}" for p in chosen]
+        playlist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return playlist_path

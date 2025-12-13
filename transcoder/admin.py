@@ -1,16 +1,17 @@
-from pathlib import Path
+from datetime import timedelta
 
 from django.conf import settings
-from django.contrib import admin
-from django.utils.html import format_html
+from django.contrib import admin, messages
+from django.http import HttpRequest, HttpResponseRedirect
+from django.urls import path, reverse
+from django.utils import timezone
 
-from .models import Channel
+from .models import Channel, InputType, OutputType, TimeShiftProfile
 
 
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
-    ordering = ("name",)
-    list_per_page = 50
+    change_list_template = "admin/transcoder/channel/change_list.html"
 
     list_display = (
         "name",
@@ -18,152 +19,229 @@ class ChannelAdmin(admin.ModelAdmin):
         "input_type",
         "input_url",
         "output_type",
-        "output_url",
-        "delay_seconds",
-        "playback_tail_enabled",
-        "recording_segment_minutes",
+        "output_target",
+        "schedule_summary",
         "auto_delete_enabled",
         "auto_delete_after_segments",
         "auto_delete_after_days",
-        "schedule_summary",
         "created_at",
     )
-
-    list_filter = (
-        "enabled",
-        "input_type",
-        "output_type",
-        "auto_delete_enabled",
-        "playback_tail_enabled",
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-        "sunday",
-    )
-
-    search_fields = ("name", "input_url", "output_url")
-
-    readonly_fields = (
-        "created_at",
-        "updated_at",
-        "record_log",
-        "playback_log",
-    )
+    list_filter = ("enabled", "input_type", "output_type", "auto_delete_enabled")
+    search_fields = ("name", "input_url", "output_target")
 
     fieldsets = (
-        ("Basic", {
-            "fields": (("name", "enabled"),),
-        }),
-        ("Input", {
-            "fields": (
-                ("input_type",),
-                ("input_url",),
-                ("multicast_interface",),
-            ),
-        }),
-        ("Output", {
-            "description": "Single output URL. delay_seconds controls how far back we play from recordings.",
-            "fields": (
-                ("output_type", "output_url"),
-                ("delay_seconds", "playback_tail_enabled"),
-            ),
-        }),
-        ("Processing", {
-            "fields": (
-                ("hardware_preference",),
-                ("video_mode", "audio_mode"),
-                ("video_codec", "audio_codec"),
-                ("video_bitrate",),
-                ("target_width", "target_height"),
-            ),
-        }),
+        ("Basics", {"fields": ("name", "enabled", "is_test_channel")}),
+        ("Input", {"fields": ("input_type", "input_url", "multicast_interface")}),
+        ("Output", {"fields": ("output_type", "output_target")}),
         ("Schedule", {
-            "description": (
-                "If start_time == end_time (including both empty), the channel runs full-day "
-                "for the selected weekdays, within the optional date range."
-            ),
             "fields": (
                 ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
                 ("start_time", "end_time"),
                 ("date_from", "date_to"),
-            ),
+            )
         }),
         ("Recording & Auto-delete", {
-            "description": "Segments are .ts files. Deletion can be by segment count, by age (days), or both.",
             "fields": (
-                ("record_enabled",),
-                ("recording_path_template",),
-                ("recording_segment_minutes",),
-                ("auto_delete_enabled",),
-                ("auto_delete_after_segments", "auto_delete_after_days"),
-            ),
+                "recording_path_template",
+                "recording_segment_minutes",
+                "auto_delete_enabled",
+                "auto_delete_after_segments",
+                "auto_delete_after_days",
+            )
         }),
-        ("Logs", {
-            "description": "FFmpeg logs written by the enforcer under media/ffmpeg_logs/.",
-            "fields": (
-                ("record_log", "playback_log"),
-            ),
-        }),
-        ("Timestamps", {
-            "fields": (("created_at", "updated_at"),),
-        }),
+        ("Transcoding", {"fields": (("video_mode", "audio_mode"), "video_codec", "audio_codec")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
-    # -----------------------------
-    # Schedule summary
-    # -----------------------------
+    readonly_fields = ("created_at", "updated_at")
+
+    # ------------------------
+    # Admin tools (no JS)
+    # ------------------------
+    def get_urls(self):
+        """
+        IMPORTANT: our custom URLs must come BEFORE the default ModelAdmin URLs,
+        otherwise 'tools/...' can be interpreted as <object_id>.
+        """
+        urls = super().get_urls()
+        my_urls = [
+            path(
+                "tools/create-test/",
+                self.admin_site.admin_view(self.create_test_channel_view),
+                name="transcoder_channel_create_test",
+            ),
+            path(
+                "tools/delete-test/",
+                self.admin_site.admin_view(self.delete_test_channel_view),
+                name="transcoder_channel_delete_test",
+            ),
+            path(
+                "tools/start-test/",
+                self.admin_site.admin_view(self.start_test_channel_view),
+                name="transcoder_channel_start_test",
+            ),
+            path(
+                "tools/stop-test/",
+                self.admin_site.admin_view(self.stop_test_channel_view),
+                name="transcoder_channel_stop_test",
+            ),
+        ]
+        return my_urls + urls
+
+    def _changelist_redirect(self) -> HttpResponseRedirect:
+        return HttpResponseRedirect(reverse("admin:transcoder_channel_changelist"))
+
+    def _ensure_superuser(self, request: HttpRequest) -> bool:
+        if not request.user.is_superuser:
+            self.message_user(request, "Superuser permission required.", level=messages.ERROR)
+            return False
+        return True
+
+    def _test_output_url(self) -> str:
+        return getattr(settings, "TEST_CHANNEL_OUTPUT_URL", "udp://127.0.0.1:5002")
+
+    def _get_test_channel(self):
+        return Channel.objects.filter(is_test_channel=True).order_by("-id").first()
+
+    def _build_test_defaults(self):
+        now = timezone.localtime()
+        today = now.date()
+        return {
+            "name": "__TEST__ Internal Generator",
+            "enabled": False,
+            "is_test_channel": True,
+            "input_type": InputType.INTERNAL_GENERATOR,
+            "input_url": "internal://generator",
+            "output_type": OutputType.UDP_TS,
+            "output_target": self._test_output_url(),
+            "recording_segment_minutes": 1,
+            "auto_delete_enabled": True,
+            "auto_delete_after_segments": 5,
+            "auto_delete_after_days": None,
+            "monday": True,
+            "tuesday": True,
+            "wednesday": True,
+            "thursday": True,
+            "friday": True,
+            "saturday": True,
+            "sunday": True,
+            "start_time": None,
+            "end_time": None,
+            "date_from": today,
+            "date_to": today + timedelta(days=2),
+        }
+
+    def create_test_channel_view(self, request: HttpRequest):
+        if request.method != "POST":
+            return self._changelist_redirect()
+        if not self._ensure_superuser(request):
+            return self._changelist_redirect()
+
+        existing = self._get_test_channel()
+        if existing:
+            self.message_user(
+                request,
+                f"Test channel already exists (id={existing.id}).",
+                level=messages.WARNING,
+            )
+            return self._changelist_redirect()
+
+        chan = Channel.objects.create(**self._build_test_defaults())
+        TimeShiftProfile.objects.create(channel=chan, enabled=True, delay_minutes=1)
+
+        self.message_user(
+            request,
+            f"Created test channel (id={chan.id}) output={chan.output_target}. "
+            f"Now click 'Start test channel' and open VLC: {chan.output_target}",
+            level=messages.SUCCESS,
+        )
+        return self._changelist_redirect()
+
+    def delete_test_channel_view(self, request: HttpRequest):
+        if request.method != "POST":
+            return self._changelist_redirect()
+        if not self._ensure_superuser(request):
+            return self._changelist_redirect()
+
+        chan = self._get_test_channel()
+        if not chan:
+            self.message_user(request, "No test channel found.", level=messages.WARNING)
+            return self._changelist_redirect()
+
+        cid = chan.id
+        chan.delete()
+        self.message_user(request, f"Deleted test channel (id={cid}).", level=messages.SUCCESS)
+        return self._changelist_redirect()
+
+    def start_test_channel_view(self, request: HttpRequest):
+        if request.method != "POST":
+            return self._changelist_redirect()
+        if not self._ensure_superuser(request):
+            return self._changelist_redirect()
+
+        chan = self._get_test_channel()
+        if not chan:
+            self.message_user(request, "No test channel found. Create it first.", level=messages.ERROR)
+            return self._changelist_redirect()
+
+        chan.enabled = True
+        chan.save(update_fields=["enabled"])
+
+        self.message_user(
+            request,
+            f"Started test channel (id={chan.id}). If enforcer is running, record+playback should start.",
+            level=messages.SUCCESS,
+        )
+        return self._changelist_redirect()
+
+    def stop_test_channel_view(self, request: HttpRequest):
+        if request.method != "POST":
+            return self._changelist_redirect()
+        if not self._ensure_superuser(request):
+            return self._changelist_redirect()
+
+        chan = self._get_test_channel()
+        if not chan:
+            self.message_user(request, "No test channel found.", level=messages.WARNING)
+            return self._changelist_redirect()
+
+        chan.enabled = False
+        chan.save(update_fields=["enabled"])
+
+        self.message_user(
+            request,
+            f"Stopped test channel (id={chan.id}). Enforcer should terminate ffmpeg shortly.",
+            level=messages.SUCCESS,
+        )
+        return self._changelist_redirect()
+
+    # ------------------------
+    # Display helper
+    # ------------------------
     @admin.display(description="Schedule")
     def schedule_summary(self, obj: Channel) -> str:
         days = []
-        if obj.monday: days.append("Mon")
-        if obj.tuesday: days.append("Tue")
-        if obj.wednesday: days.append("Wed")
-        if obj.thursday: days.append("Thu")
-        if obj.friday: days.append("Fri")
-        if obj.saturday: days.append("Sat")
-        if obj.sunday: days.append("Sun")
+        if obj.monday:
+            days.append("Mon")
+        if obj.tuesday:
+            days.append("Tue")
+        if obj.wednesday:
+            days.append("Wed")
+        if obj.thursday:
+            days.append("Thu")
+        if obj.friday:
+            days.append("Fri")
+        if obj.saturday:
+            days.append("Sat")
+        if obj.sunday:
+            days.append("Sun")
         days_text = ",".join(days) if days else "-"
 
-        start = obj.start_time.strftime("%H:%M") if obj.start_time else "00:00"
-        end = obj.end_time.strftime("%H:%M") if obj.end_time else "00:00"
-        time_text = f"{start}–{end}"
+        if obj.start_time and obj.end_time:
+            time_text = f"{obj.start_time.strftime('%H:%M')}–{obj.end_time.strftime('%H:%M')}"
+        else:
+            time_text = "Full day"
 
         date_from = obj.date_from.isoformat() if obj.date_from else "any"
         date_to = obj.date_to.isoformat() if obj.date_to else "any"
         return f"{days_text} {time_text} [{date_from} → {date_to}]"
-
-    # -----------------------------
-    # Log links (media-served files)
-    # -----------------------------
-    def _safe_name(self, name: str) -> str:
-        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name)
-
-    def _log_paths(self, obj: Channel, purpose: str) -> tuple[Path, Path]:
-        safe_name = self._safe_name(obj.name)
-        rel = Path("ffmpeg_logs") / f"{safe_name}_{purpose}.log"
-        abs_path = Path(settings.MEDIA_ROOT) / rel
-        return rel, abs_path
-
-    def _log_link_html(self, rel: Path, abs_path: Path) -> str:
-        if not abs_path.exists():
-            return "Missing"
-        try:
-            size_kb = abs_path.stat().st_size // 1024
-        except Exception:
-            size_kb = "?"
-        media_url = settings.MEDIA_URL if settings.MEDIA_URL.endswith("/") else settings.MEDIA_URL + "/"
-        url = f"{media_url}{rel.as_posix()}"
-        return format_html('<a href="{}" target="_blank">Open</a> ({} KB)', url, size_kb)
-
-    @admin.display(description="Record log")
-    def record_log(self, obj: Channel):
-        rel, abs_path = self._log_paths(obj, "record")
-        return self._log_link_html(rel, abs_path)
-
-    @admin.display(description="Playback log")
-    def playback_log(self, obj: Channel):
-        rel, abs_path = self._log_paths(obj, "playback")
-        return self._log_link_html(rel, abs_path)

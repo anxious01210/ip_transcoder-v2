@@ -1,8 +1,9 @@
+from __future__ import annotations
+
+import datetime
 from django.db import models
 from django.utils import timezone
 from django.core.validators import MaxValueValidator
-import datetime
-from datetime import timedelta
 
 
 class InputType(models.TextChoices):
@@ -10,6 +11,7 @@ class InputType(models.TextChoices):
     RTSP = "rtsp", "RTSP"
     RTMP = "rtmp", "RTMP"
     FILE = "file", "File"
+    INTERNAL_GENERATOR = "internal_gen", "Internal Generator (Test)"
 
 
 class OutputType(models.TextChoices):
@@ -21,79 +23,89 @@ class OutputType(models.TextChoices):
 
 
 class VideoMode(models.TextChoices):
-    COPY = "copy", "Copy (no transcode)"
-    TRANSCODE = "transcode", "Transcode"
+    COPY = "copy", "Copy (no re-encode)"
+    ENCODE = "encode", "Encode (re-encode)"
 
 
 class AudioMode(models.TextChoices):
-    COPY = "copy", "Copy (no transcode)"
-    TRANSCODE = "transcode", "Transcode"
-    DISABLE = "disable", "Disable audio"
+    COPY = "copy", "Copy (no re-encode)"
+    ENCODE = "encode", "Encode (re-encode)"
+    DISABLE = "disable", "Disable (no audio)"
 
 
-class HardwarePreference(models.TextChoices):
-    AUTO = "auto", "Auto (NVIDIA → Intel → CPU)"
-    NVIDIA = "nvidia", "Force NVIDIA (if available)"
-    INTEL = "intel", "Force Intel QSV (if available)"
-    CPU = "cpu", "Force CPU"
+class JobPurpose(models.TextChoices):
+    RECORD = "record", "Record"
+    PLAYBACK = "playback", "Playback (time-shift)"
 
 
 class Channel(models.Model):
     """
     v3 baseline:
-    - Single mode: Record + Time-shift (delayed playback) with ONE output URL.
+    - Single mode: Record + Time-shift (delayed playback) with ONE output target.
     - Recording writes .ts segments to disk.
-    - Output restreams from recorded segments according to delay_seconds (0..24h).
+    - Playback restreams from recorded segments according to delay (TimeShiftProfile).
     """
+
     name = models.CharField(max_length=100, unique=True)
-    enabled = models.BooleanField(default=True)
+
+    is_test_channel = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Marks a channel as an internal test channel (created from admin tools).",
+    )
+
+    enabled = models.BooleanField(
+        default=True,
+        help_text="If off, enforcer will not run this channel.",
+    )
 
     # Input
-    input_type = models.CharField(max_length=20, choices=InputType.choices)
+    input_type = models.CharField(
+        max_length=20,
+        choices=InputType.choices,
+        default=InputType.MULTICAST_UDP,   # ✅ default prevents migration prompt
+    )
+
     input_url = models.CharField(
         max_length=512,
+        default="udp://@239.0.0.1:5000",  # ✅ safe placeholder for existing rows
         help_text=(
-            "For multicast: e.g. udp://@224.2.2.2:2001 "
-            "(we'll add fifo_size & overrun options automatically)."
+            "For multicast: e.g. udp://@239.10.10.10:5001 "
+            "(fifo_size & overrun options may be added automatically). "
+            "For Internal Generator, this can be internal://generator."
         ),
     )
+
     multicast_interface = models.CharField(
         max_length=64,
         blank=True,
-        help_text="Optional: e.g. eth0. Leave blank to use system default.",
+        default="",
+        help_text="Optional: network interface/IP for multicast receiving (advanced usage).",
     )
 
     # Output (ONE target only)
     output_type = models.CharField(
         max_length=20,
         choices=OutputType.choices,
-        default=OutputType.UDP_TS,
+        default=OutputType.UDP_TS,  # ✅ default prevents migration prompt
     )
-    output_url = models.CharField(
+
+    output_target = models.CharField(
         max_length=512,
+        default="udp://127.0.0.1:5002",  # ✅ default prevents migration prompt
         help_text="For UDP/RTMP: URL (udp://ip:port, rtmp://...). For HLS: directory path.",
     )
 
-    # Time-shift delay (0..86400 seconds = 24 hours)
-    delay_seconds = models.PositiveIntegerField(
-        default=0,
-        validators=[MaxValueValidator(24 * 3600)],
-        help_text="0 = no delay. Max 86400 seconds (24 hours).",
-    )
-
+    # Tail behavior (your earlier requirement)
     playback_tail_enabled = models.BooleanField(
         default=False,
         help_text=(
             "If enabled: when schedule ends, recording stops immediately but playback continues "
-            "until (schedule_end + delay_seconds). Useful to flush the delayed buffer."
+            "until (schedule_end + delay). Useful to flush the delayed buffer."
         ),
     )
 
-    # Recording settings
-    record_enabled = models.BooleanField(
-        default=True,
-        help_text="If on, the channel records TS segments to disk (required for time-shift).",
-    )
+    # Recording
     recording_path_template = models.CharField(
         max_length=512,
         default="recordings/{channel}/{date}/",
@@ -102,6 +114,7 @@ class Channel(models.Model):
             "Use {channel}, {date}, {time} placeholders."
         ),
     )
+
     recording_segment_minutes = models.PositiveIntegerField(
         default=60,
         help_text="Length of each recording segment in minutes.",
@@ -110,53 +123,27 @@ class Channel(models.Model):
     # Auto-delete (segments and/or days)
     auto_delete_enabled = models.BooleanField(
         default=False,
-        help_text=(
-            "If enabled, old recording segments will be deleted automatically "
-            "based on the thresholds below."
-        ),
+        help_text="If enabled, old recording segments will be deleted automatically.",
     )
+
     auto_delete_after_segments = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text=(
-            "Maximum number of most recent segments to keep in each recording folder. "
-            "Older segments beyond this count may be deleted. Leave blank to ignore."
-        ),
+        help_text="Keep last N segments. Leave blank to ignore.",
     )
+
     auto_delete_after_days = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text=(
-            "Also delete segments older than this many days. "
-            "Leave blank to ignore age-based cleanup."
-        ),
+        help_text="Delete segments older than N days. Leave blank to ignore.",
     )
 
-    # Codec / processing – copy by default (CPU-only is your target, but we keep the fields)
-    video_mode = models.CharField(max_length=16, choices=VideoMode.choices, default=VideoMode.COPY)
-    audio_mode = models.CharField(max_length=16, choices=AudioMode.choices, default=AudioMode.COPY)
+    # Transcoding / copy settings
+    video_mode = models.CharField(max_length=20, choices=VideoMode.choices, default=VideoMode.COPY)
+    video_codec = models.CharField(max_length=50, blank=True, default="", help_text="When encoding video, e.g. libx264")
 
-    video_codec = models.CharField(
-        max_length=16,
-        default="h264",
-        help_text="Used only when transcoding (e.g. h264, hevc).",
-    )
-    audio_codec = models.CharField(
-        max_length=16,
-        default="aac",
-        help_text="Used only when transcoding audio.",
-    )
-
-    hardware_preference = models.CharField(
-        max_length=16,
-        choices=HardwarePreference.choices,
-        default=HardwarePreference.CPU,  # v3: CPU-only baseline
-        help_text="v3 baseline is CPU-only. Keep this field for future flexibility.",
-    )
-
-    target_width = models.PositiveIntegerField(null=True, blank=True, help_text="E.g. 1920. If null, keep source.")
-    target_height = models.PositiveIntegerField(null=True, blank=True, help_text="E.g. 1080. If null, keep source.")
-    video_bitrate = models.CharField(max_length=16, blank=True, help_text="E.g. 4000k. If blank, FFmpeg decides.")
+    audio_mode = models.CharField(max_length=20, choices=AudioMode.choices, default=AudioMode.COPY)
+    audio_codec = models.CharField(max_length=50, blank=True, default="", help_text="When encoding audio, e.g. aac")
 
     # Weekly schedule directly on Channel
     monday = models.BooleanField(default=True)
@@ -170,42 +157,34 @@ class Channel(models.Model):
     start_time = models.TimeField(
         null=True,
         blank=True,
-        help_text=(
-            "Local start time (HH:MM). "
-            "If start_time == end_time, the channel runs the full day on selected weekdays."
-        ),
+        help_text="Local start time. If blank, treated as 00:00.",
     )
+
     end_time = models.TimeField(
         null=True,
         blank=True,
-        help_text=(
-            "Local end time (HH:MM). "
-            "If earlier than start_time, the channel runs overnight."
-        ),
+        help_text="Local end time. If blank, treated as 00:00. If start == end -> full day.",
     )
 
-    date_from = models.DateField(null=True, blank=True, help_text="Optional: only apply from this date (inclusive).")
-    date_to = models.DateField(null=True, blank=True, help_text="Optional: only apply up to this date (inclusive).")
+    date_from = models.DateField(null=True, blank=True, help_text="First active date (inclusive).")
+    date_to = models.DateField(null=True, blank=True, help_text="Last active date (inclusive).")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ("name",)
 
     def __str__(self) -> str:
         return self.name
 
     def is_active_now(self, now: datetime.datetime | None = None) -> bool:
         """
-        Check if this channel should be active at the given 'now' (local time)
-        based on its built-in weekly schedule.
-
-        Semantics:
-        - If start_time == end_time (and not null) -> active full day for selected weekdays
-        - If start_time < end_time                 -> active between start and end same day
-        - If start_time > end_time                 -> overnight window (e.g. 20:00 -> 06:00)
-        - If start_time or end_time is null        -> treated as 00:00
+        Schedule semantics:
+        - If start_time == end_time (and not null)  -> active FULL day for selected weekdays.
+        - If start_time < end_time                  -> active between start and end.
+        - If start_time > end_time                  -> overnight window (e.g. 20:00 -> 06:00).
+        - If start_time or end_time is null         -> treated as 00:00.
         """
         if not self.enabled:
             return False
@@ -215,16 +194,15 @@ class Channel(models.Model):
 
         local_date = now.date()
         local_time = now.time()
-        weekday = now.weekday()  # Mon=0..Sun=6
 
-        start_time = self.start_time or datetime.time(0, 0)
-        end_time = self.end_time or datetime.time(0, 0)
-
+        # Date range check
         if self.date_from and local_date < self.date_from:
             return False
         if self.date_to and local_date > self.date_to:
             return False
 
+        # Weekday check
+        weekday = local_date.weekday()  # Mon=0..Sun=6
         weekday_flags = [
             self.monday,
             self.tuesday,
@@ -237,105 +215,39 @@ class Channel(models.Model):
         if not weekday_flags[weekday]:
             return False
 
+        start_time = self.start_time or datetime.time(0, 0)
+        end_time = self.end_time or datetime.time(0, 0)
+
         if start_time == end_time:
             return True
 
         if start_time < end_time:
             return start_time <= local_time < end_time
-        else:
-            return (local_time >= start_time) or (local_time < end_time)
 
-    def is_record_active_now(self, now=None) -> bool:
-        """
-        Recording follows schedule strictly.
-        """
-        return self.is_active_now(now=now)
+        # Overnight
+        return (local_time >= start_time) or (local_time < end_time)
 
-    def is_playback_active_now(self, now=None) -> bool:
-        """
-        Playback is active if:
-        - schedule is active now, OR
-        - playback_tail_enabled and we're within (last_schedule_end + delay_seconds)
-        """
-        if not self.enabled:
-            return False
 
-        if now is None:
-            now = timezone.localtime()
+class TimeShiftProfile(models.Model):
+    """
+    Delay configuration for a channel.
+    Output destination is channel.output_target (single output design).
+    """
+    channel = models.OneToOneField(Channel, on_delete=models.CASCADE, related_name="timeshift_profile")
+    enabled = models.BooleanField(default=False)
 
-        # If schedule is currently active -> playback should run
-        if self.is_active_now(now=now):
-            return True
+    delay_minutes = models.PositiveIntegerField(
+        default=60,
+        validators=[MaxValueValidator(24 * 60)],  # 0..1440
+        help_text="Delay amount in minutes (0..1440).",
+    )
 
-        # If no tail -> stop playback when schedule stops
-        if not self.playback_tail_enabled:
-            return False
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-        # If delay is 0 -> tail doesn't matter
-        if not self.delay_seconds:
-            return False
+    class Meta:
+        verbose_name = "Time-shift profile"
+        verbose_name_plural = "Time-shift profiles"
 
-        last_end = self._most_recent_schedule_end_dt(now)
-        if not last_end:
-            return False
-
-        return now <= (last_end + timedelta(seconds=int(self.delay_seconds)))
-
-    def _most_recent_schedule_end_dt(self, now):
-        """
-        Find the most recent schedule end datetime that is <= now.
-        Works for same-day and overnight windows.
-
-        We search backward up to 8 days to find the latest end moment.
-        """
-        # If start==end -> full-day schedule, no "end moment" tail concept
-        start_time = self.start_time or datetime.time(0, 0)
-        end_time = self.end_time or datetime.time(0, 0)
-        if start_time == end_time:
-            return None
-
-        # Helper: weekday enabled?
-        weekday_flags = [
-            self.monday,
-            self.tuesday,
-            self.wednesday,
-            self.thursday,
-            self.friday,
-            self.saturday,
-            self.sunday,
-        ]
-
-        best_end = None
-        today = now.date()
-
-        # We iterate start-days backward; for overnight schedules,
-        # end is on the next day morning.
-        for delta_days in range(0, 8):
-            start_day = today - datetime.timedelta(days=delta_days)
-
-            # date_from/date_to apply to the "start_day" of the scheduled window
-            if self.date_from and start_day < self.date_from:
-                continue
-            if self.date_to and start_day > self.date_to:
-                continue
-
-            if not weekday_flags[start_day.weekday()]:
-                continue
-
-            # Compute end datetime for the window starting on start_day
-            if start_time < end_time:
-                # Same-day window: start_day start -> start_day end
-                end_dt = datetime.datetime.combine(start_day, end_time)
-            else:
-                # Overnight window: start_day start -> (start_day + 1) end
-                end_dt = datetime.datetime.combine(start_day + datetime.timedelta(days=1), end_time)
-
-            # Make it timezone-aware in the same zone as `now`
-            # If your project runs with USE_TZ=False, this still behaves fine because now is localtime().
-            if timezone.is_naive(end_dt) and not timezone.is_naive(now):
-                end_dt = timezone.make_aware(end_dt, timezone.get_current_timezone())
-
-            if end_dt <= now and (best_end is None or end_dt > best_end):
-                best_end = end_dt
-
-        return best_end
+    def __str__(self) -> str:
+        return f"TimeShift({self.channel.name}, {self.delay_minutes} min)"
