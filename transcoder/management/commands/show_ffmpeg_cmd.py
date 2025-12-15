@@ -1,7 +1,6 @@
-# transcoder/management/commands/show_ffmpeg_cmd.py
 from django.core.management.base import BaseCommand, CommandError
 
-from transcoder.ffmpeg_runner import build_ffmpeg_cmd_for_channel
+from transcoder.ffmpeg_runner import FFmpegJobConfig
 from transcoder.models import Channel
 
 
@@ -26,8 +25,9 @@ class Command(BaseCommand):
         except Channel.DoesNotExist:
             raise CommandError(f"Channel with id={channel_id} does not exist.")
 
-        cmd = build_ffmpeg_cmd_for_channel(channel_id, purpose=purpose)
+        cmd = FFmpegJobConfig(channel=chan, purpose=purpose).build_command()
+
         self.stdout.write(self.style.SUCCESS(f"Channel: {chan.name}"))
         self.stdout.write(f"Purpose: {purpose}")
         self.stdout.write("FFmpeg command:")
-        self.stdout.write(cmd)
+        self.stdout.write(" ".join(cmd))

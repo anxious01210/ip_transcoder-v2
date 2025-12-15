@@ -21,9 +21,14 @@ from django.conf.urls.static import static
 from transcoder.admin_views import transcoder_overview
 
 urlpatterns = [
+    path("", include("core.urls")),
     path("admin/transcoder/overview/", transcoder_overview, name="transcoder_overview"),
     path('admin/', admin.site.urls),
 ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+admin.site.site_header = "IP TransCoder"
+admin.site.site_title = "IP TransCoder Admin"
+admin.site.index_title = "IP TransCoder Control Panel"

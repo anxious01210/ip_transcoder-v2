@@ -60,32 +60,82 @@ class FFmpegJobConfig:
             return args
 
         # ------------------------
-        # PLAYBACK
+        # PLAYBACK (LIVE or TIME-SHIFT)
         # ------------------------
         if self.purpose == "playback":
-            profile: Optional[TimeShiftProfile] = getattr(chan, "timeshift_profile", None)
-            if not profile or not getattr(profile, "enabled", False):
-                raise ValueError("Time-shift profile is not enabled for this channel.")
-
             if chan.output_type != "udp_ts" or not (chan.output_target or "").strip():
                 raise ValueError("Channel output must be UDP TS and output_target must be set for playback.")
 
-            delay_minutes = int(profile.delay_minutes or 0)
-            if delay_minutes <= 0:
-                raise ValueError("delay_minutes must be > 0 for playback.")
-
             output_udp_url = (chan.output_target or "").strip()
 
-            playlist_path = self._build_playback_concat_playlist(delay_minutes)
+            # VLC-safe UDP TS output (works better when joining mid-stream)
+            if output_udp_url.startswith("udp://") and "pkt_size=" not in output_udp_url:
+                sep = "&" if "?" in output_udp_url else "?"
+                output_udp_url = f"{output_udp_url}{sep}pkt_size=1316"
+
+            profile: Optional[TimeShiftProfile] = (
+                    getattr(chan, "timeshift_profile", None)
+                    or getattr(chan, "timeshiftprofile", None)
+            )
+
+            enabled = bool(profile and getattr(profile, "enabled", False))
+            delay_seconds = int(getattr(profile, "delay_seconds", 0) or 0)
+
+            # LIVE MODE (0 sec) => NO recording required, direct restream
+            if (not enabled) or delay_seconds <= 0:
+                args += self._build_live_input_args()
+
+                is_internal_gen = (chan.input_type == "internal_gen")
+
+                # Video
+                if (not is_internal_gen) and chan.video_mode == VideoMode.COPY:
+                    args += ["-c:v", "copy"]
+                else:
+                    args += ["-c:v", chan.video_codec or "libx264"]
+                    if is_internal_gen:
+                        args += ["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"]
+
+                # Audio
+                if (not is_internal_gen) and chan.audio_mode == AudioMode.COPY:
+                    args += ["-c:a", "copy"]
+                elif chan.audio_mode == AudioMode.DISABLE:
+                    args += ["-an"]
+                else:
+                    args += ["-c:a", chan.audio_codec or "aac"]
+                    if is_internal_gen:
+                        args += ["-b:a", "128k", "-ac", "2"]
+
+                args += [
+                    "-f", "mpegts",
+                    "-mpegts_flags", "+resend_headers",
+                    "-muxdelay", "0",
+                    "-muxpreload", "0",
+                    output_udp_url,
+                ]
+                return args
+
+            # TIME-SHIFT MODE (>0 sec) => requires enabled profile + recorded segments
+            if not enabled:
+                raise ValueError("Time-shift profile is not enabled for delayed playback.")
+            if delay_seconds > 24 * 60 * 60:
+                raise ValueError("delay_seconds must be <= 86400 (24h).")
+
+            playlist_path = self._build_playback_concat_playlist(delay_seconds)
 
             args += [
                 "-re",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(playlist_path),
+
                 "-c:v", "copy",
                 "-c:a", "copy",
+
                 "-f", "mpegts",
+                "-mpegts_flags", "+resend_headers",
+                "-muxdelay", "0",
+                "-muxpreload", "0",
+
                 output_udp_url,
             ]
             return args
@@ -210,27 +260,37 @@ class FFmpegJobConfig:
         items.sort(key=lambda x: x[0])
         return items
 
-    def _build_playback_concat_playlist(self, delay_minutes: int) -> Path:
+    def _build_playback_concat_playlist(self, delay_seconds: int) -> Path:
         """
-        Build a finite concat playlist window around the delayed timestamp.
+        Build a finite concat playlist window that ENDS at the delayed timestamp.
+
+        Important:
+        - We must NOT include segments newer than the delayed target time.
+          If we do, playback will drift toward "live" as soon as any new segment exists
+          (including the currently-being-written segment), making a 1-minute delay look
+          like only a few seconds.
+        - Therefore, the playlist is chosen from [target-window, target].
+
         Enforcer will restart playback after it exits, which keeps playback continuous.
         """
         window_seconds = int(getattr(settings, "PLAYBACK_PLAYLIST_WINDOW_SECONDS", 3 * 3600))
 
         # localtime -> make naive for filename timestamps
         now = timezone.localtime().replace(tzinfo=None)
-        target = now - timedelta(minutes=delay_minutes)
+        target = now - timedelta(seconds=delay_seconds)
 
+        # Choose a historical window that ENDS at the target (delayed) time.
         start_ts = target - timedelta(seconds=window_seconds)
-        end_ts = target + timedelta(seconds=window_seconds)
+        end_ts = target
 
         segments = self._iter_recording_segments()
-        chosen = [p for (ts, p) in segments if (ts >= start_ts and ts <= end_ts)]
+        # Only pick segments that are not newer than the delayed target.
+        chosen = [p for (ts, p) in segments if (start_ts <= ts <= end_ts)]
 
         if not chosen:
             raise FileNotFoundError(
                 f"No TS segments found for playback yet for channel {self.channel.name!r} "
-                f"(delay={delay_minutes}m, window={window_seconds}s). "
+                f"(delay={delay_seconds}s, window={window_seconds}s). "
                 f"Recording may still be warming up; enforcer will retry."
             )
 

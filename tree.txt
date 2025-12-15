@@ -1,0 +1,396 @@
+.
+├── core
+│   ├── admin.py
+│   ├── apps.py
+│   ├── __init__.py
+│   ├── migrations
+│   │   └── __init__.py
+│   ├── models.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── urls.cpython-312.pyc
+│   │   └── views.cpython-312.pyc
+│   ├── templates
+│   │   └── core
+│   │       └── home.html
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py
+├── db.sqlite3
+├── Documents
+│   └── details_01.txt
+├── from_udp.ts
+├── iptranscoder
+│   ├── asgi.py
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── settings.cpython-312.pyc
+│   │   ├── urls.cpython-312.pyc
+│   │   └── wsgi.cpython-312.pyc
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── manage.py
+├── media
+│   ├── playlists
+│   │   └── channel_10
+│   │       └── concat.txt
+│   └── recordings
+│       └── __TEST__ Internal Generator
+│           └── 20251215
+│               ├── __TEST__ Internal Generator_20251215-055152.ts
+│               ├── __TEST__ Internal Generator_20251215-055251.ts
+│               ├── __TEST__ Internal Generator_20251215-055351.ts
+│               ├── __TEST__ Internal Generator_20251215-055451.ts
+│               ├── __TEST__ Internal Generator_20251215-055551.ts
+│               ├── __TEST__ Internal Generator_20251215-055651.ts
+│               ├── __TEST__ Internal Generator_20251215-055751.ts
+│               ├── __TEST__ Internal Generator_20251215-055851.ts
+│               ├── __TEST__ Internal Generator_20251215-055951.ts
+│               ├── __TEST__ Internal Generator_20251215-060051.ts
+│               ├── __TEST__ Internal Generator_20251215-060151.ts
+│               ├── __TEST__ Internal Generator_20251215-060251.ts
+│               ├── __TEST__ Internal Generator_20251215-060351.ts
+│               ├── __TEST__ Internal Generator_20251215-060451.ts
+│               ├── __TEST__ Internal Generator_20251215-060551.ts
+│               ├── __TEST__ Internal Generator_20251215-060651.ts
+│               ├── __TEST__ Internal Generator_20251215-060751.ts
+│               ├── __TEST__ Internal Generator_20251215-060851.ts
+│               ├── __TEST__ Internal Generator_20251215-060951.ts
+│               ├── __TEST__ Internal Generator_20251215-061051.ts
+│               ├── __TEST__ Internal Generator_20251215-061151.ts
+│               ├── __TEST__ Internal Generator_20251215-061251.ts
+│               ├── __TEST__ Internal Generator_20251215-061351.ts
+│               ├── __TEST__ Internal Generator_20251215-061451.ts
+│               ├── __TEST__ Internal Generator_20251215-061551.ts
+│               ├── __TEST__ Internal Generator_20251215-061651.ts
+│               ├── __TEST__ Internal Generator_20251215-061751.ts
+│               ├── __TEST__ Internal Generator_20251215-061851.ts
+│               ├── __TEST__ Internal Generator_20251215-061951.ts
+│               ├── __TEST__ Internal Generator_20251215-062051.ts
+│               ├── __TEST__ Internal Generator_20251215-062151.ts
+│               ├── __TEST__ Internal Generator_20251215-062251.ts
+│               ├── __TEST__ Internal Generator_20251215-062351.ts
+│               ├── __TEST__ Internal Generator_20251215-062451.ts
+│               ├── __TEST__ Internal Generator_20251215-062551.ts
+│               ├── __TEST__ Internal Generator_20251215-062651.ts
+│               ├── __TEST__ Internal Generator_20251215-062751.ts
+│               ├── __TEST__ Internal Generator_20251215-062851.ts
+│               ├── __TEST__ Internal Generator_20251215-062951.ts
+│               ├── __TEST__ Internal Generator_20251215-063051.ts
+│               ├── __TEST__ Internal Generator_20251215-063151.ts
+│               ├── __TEST__ Internal Generator_20251215-063251.ts
+│               ├── __TEST__ Internal Generator_20251215-063351.ts
+│               ├── __TEST__ Internal Generator_20251215-063451.ts
+│               ├── __TEST__ Internal Generator_20251215-063551.ts
+│               ├── __TEST__ Internal Generator_20251215-063651.ts
+│               ├── __TEST__ Internal Generator_20251215-063751.ts
+│               ├── __TEST__ Internal Generator_20251215-063851.ts
+│               ├── __TEST__ Internal Generator_20251215-063951.ts
+│               ├── __TEST__ Internal Generator_20251215-064051.ts
+│               ├── __TEST__ Internal Generator_20251215-064151.ts
+│               ├── __TEST__ Internal Generator_20251215-064251.ts
+│               ├── __TEST__ Internal Generator_20251215-064351.ts
+│               ├── __TEST__ Internal Generator_20251215-064451.ts
+│               ├── __TEST__ Internal Generator_20251215-064551.ts
+│               ├── __TEST__ Internal Generator_20251215-064651.ts
+│               ├── __TEST__ Internal Generator_20251215-064751.ts
+│               ├── __TEST__ Internal Generator_20251215-064851.ts
+│               ├── __TEST__ Internal Generator_20251215-064951.ts
+│               ├── __TEST__ Internal Generator_20251215-065051.ts
+│               ├── __TEST__ Internal Generator_20251215-065151.ts
+│               ├── __TEST__ Internal Generator_20251215-065251.ts
+│               ├── __TEST__ Internal Generator_20251215-065351.ts
+│               ├── __TEST__ Internal Generator_20251215-065451.ts
+│               ├── __TEST__ Internal Generator_20251215-065551.ts
+│               ├── __TEST__ Internal Generator_20251215-065651.ts
+│               ├── __TEST__ Internal Generator_20251215-065751.ts
+│               ├── __TEST__ Internal Generator_20251215-065851.ts
+│               ├── __TEST__ Internal Generator_20251215-065951.ts
+│               ├── __TEST__ Internal Generator_20251215-070051.ts
+│               ├── __TEST__ Internal Generator_20251215-070151.ts
+│               ├── __TEST__ Internal Generator_20251215-070251.ts
+│               ├── __TEST__ Internal Generator_20251215-070351.ts
+│               ├── __TEST__ Internal Generator_20251215-070451.ts
+│               ├── __TEST__ Internal Generator_20251215-070551.ts
+│               ├── __TEST__ Internal Generator_20251215-070651.ts
+│               ├── __TEST__ Internal Generator_20251215-070751.ts
+│               ├── __TEST__ Internal Generator_20251215-070851.ts
+│               ├── __TEST__ Internal Generator_20251215-070951.ts
+│               ├── __TEST__ Internal Generator_20251215-071051.ts
+│               ├── __TEST__ Internal Generator_20251215-071151.ts
+│               ├── __TEST__ Internal Generator_20251215-071251.ts
+│               ├── __TEST__ Internal Generator_20251215-071351.ts
+│               ├── __TEST__ Internal Generator_20251215-071451.ts
+│               ├── __TEST__ Internal Generator_20251215-071551.ts
+│               ├── __TEST__ Internal Generator_20251215-071651.ts
+│               ├── __TEST__ Internal Generator_20251215-071751.ts
+│               ├── __TEST__ Internal Generator_20251215-071851.ts
+│               ├── __TEST__ Internal Generator_20251215-071951.ts
+│               ├── __TEST__ Internal Generator_20251215-072051.ts
+│               ├── __TEST__ Internal Generator_20251215-072151.ts
+│               ├── __TEST__ Internal Generator_20251215-072251.ts
+│               ├── __TEST__ Internal Generator_20251215-072351.ts
+│               ├── __TEST__ Internal Generator_20251215-072451.ts
+│               ├── __TEST__ Internal Generator_20251215-072551.ts
+│               ├── __TEST__ Internal Generator_20251215-072651.ts
+│               ├── __TEST__ Internal Generator_20251215-072734.ts
+│               ├── __TEST__ Internal Generator_20251215-072833.ts
+│               ├── __TEST__ Internal Generator_20251215-072933.ts
+│               ├── __TEST__ Internal Generator_20251215-073033.ts
+│               ├── __TEST__ Internal Generator_20251215-073133.ts
+│               ├── __TEST__ Internal Generator_20251215-073233.ts
+│               ├── __TEST__ Internal Generator_20251215-073333.ts
+│               ├── __TEST__ Internal Generator_20251215-073433.ts
+│               ├── __TEST__ Internal Generator_20251215-073533.ts
+│               ├── __TEST__ Internal Generator_20251215-073633.ts
+│               ├── __TEST__ Internal Generator_20251215-073733.ts
+│               ├── __TEST__ Internal Generator_20251215-073833.ts
+│               ├── __TEST__ Internal Generator_20251215-073933.ts
+│               ├── __TEST__ Internal Generator_20251215-074033.ts
+│               ├── __TEST__ Internal Generator_20251215-074133.ts
+│               ├── __TEST__ Internal Generator_20251215-074233.ts
+│               ├── __TEST__ Internal Generator_20251215-074333.ts
+│               ├── __TEST__ Internal Generator_20251215-074433.ts
+│               ├── __TEST__ Internal Generator_20251215-074533.ts
+│               ├── __TEST__ Internal Generator_20251215-074633.ts
+│               ├── __TEST__ Internal Generator_20251215-074733.ts
+│               ├── __TEST__ Internal Generator_20251215-074833.ts
+│               ├── __TEST__ Internal Generator_20251215-074933.ts
+│               ├── __TEST__ Internal Generator_20251215-075033.ts
+│               ├── __TEST__ Internal Generator_20251215-075133.ts
+│               ├── __TEST__ Internal Generator_20251215-075233.ts
+│               ├── __TEST__ Internal Generator_20251215-075333.ts
+│               ├── __TEST__ Internal Generator_20251215-075346.ts
+│               ├── __TEST__ Internal Generator_20251215-075446.ts
+│               ├── __TEST__ Internal Generator_20251215-075546.ts
+│               ├── __TEST__ Internal Generator_20251215-075646.ts
+│               ├── __TEST__ Internal Generator_20251215-075746.ts
+│               ├── __TEST__ Internal Generator_20251215-075846.ts
+│               ├── __TEST__ Internal Generator_20251215-075946.ts
+│               ├── __TEST__ Internal Generator_20251215-080046.ts
+│               ├── __TEST__ Internal Generator_20251215-080146.ts
+│               ├── __TEST__ Internal Generator_20251215-080246.ts
+│               ├── __TEST__ Internal Generator_20251215-080346.ts
+│               ├── __TEST__ Internal Generator_20251215-080446.ts
+│               ├── __TEST__ Internal Generator_20251215-080546.ts
+│               ├── __TEST__ Internal Generator_20251215-080646.ts
+│               ├── __TEST__ Internal Generator_20251215-080746.ts
+│               ├── __TEST__ Internal Generator_20251215-080846.ts
+│               ├── __TEST__ Internal Generator_20251215-080946.ts
+│               ├── __TEST__ Internal Generator_20251215-081046.ts
+│               ├── __TEST__ Internal Generator_20251215-081146.ts
+│               ├── __TEST__ Internal Generator_20251215-081246.ts
+│               ├── __TEST__ Internal Generator_20251215-081346.ts
+│               ├── __TEST__ Internal Generator_20251215-081446.ts
+│               ├── __TEST__ Internal Generator_20251215-081546.ts
+│               └── __TEST__ Internal Generator_20251215-081646.ts
+├── project_tree.txt
+├── requirements.txt
+├── scripts
+│   ├── django_deploy_wizard_v4_1.sh
+│   ├── enforcer_service.sh
+│   ├── old_ones
+│   │   ├── django_deploy_wizard.sh
+│   │   ├── django_full_stack_setup.sh
+│   │   ├── django_setup_no-gunicornNenforcer.sh
+│   │   └── install_enforcer_service.sh
+│   └── Script running details.txt
+├── staticfiles
+│   └── admin
+│       ├── css
+│       │   ├── autocomplete.css
+│       │   ├── base.css
+│       │   ├── changelists.css
+│       │   ├── dark_mode.css
+│       │   ├── dashboard.css
+│       │   ├── forms.css
+│       │   ├── login.css
+│       │   ├── nav_sidebar.css
+│       │   ├── responsive.css
+│       │   ├── responsive_rtl.css
+│       │   ├── rtl.css
+│       │   ├── unusable_password_field.css
+│       │   ├── vendor
+│       │   │   └── select2
+│       │   │       ├── LICENSE-SELECT2.md
+│       │   │       ├── select2.css
+│       │   │       └── select2.min.css
+│       │   └── widgets.css
+│       ├── img
+│       │   ├── calendar-icons.svg
+│       │   ├── icon-addlink.svg
+│       │   ├── icon-alert-dark.svg
+│       │   ├── icon-alert.svg
+│       │   ├── icon-calendar.svg
+│       │   ├── icon-changelink.svg
+│       │   ├── icon-clock.svg
+│       │   ├── icon-debug-dark.svg
+│       │   ├── icon-debug.svg
+│       │   ├── icon-deletelink.svg
+│       │   ├── icon-hidelink.svg
+│       │   ├── icon-info-dark.svg
+│       │   ├── icon-info.svg
+│       │   ├── icon-no-dark.svg
+│       │   ├── icon-no.svg
+│       │   ├── icon-unknown-alt.svg
+│       │   ├── icon-unknown.svg
+│       │   ├── icon-viewlink.svg
+│       │   ├── icon-yes-dark.svg
+│       │   ├── icon-yes.svg
+│       │   ├── inline-delete.svg
+│       │   ├── README.md
+│       │   ├── search.svg
+│       │   ├── selector-icons.svg
+│       │   ├── sorting-icons.svg
+│       │   ├── tooltag-add.svg
+│       │   └── tooltag-arrowright.svg
+│       └── js
+│           ├── actions.js
+│           ├── admin
+│           │   ├── DateTimeShortcuts.js
+│           │   └── RelatedObjectLookups.js
+│           ├── autocomplete.js
+│           ├── calendar.js
+│           ├── cancel.js
+│           ├── change_form.js
+│           ├── core.js
+│           ├── filters.js
+│           ├── inlines.js
+│           ├── jquery.init.js
+│           ├── nav_sidebar.js
+│           ├── popup_response.js
+│           ├── prepopulate_init.js
+│           ├── prepopulate.js
+│           ├── SelectBox.js
+│           ├── SelectFilter2.js
+│           ├── theme.js
+│           ├── urlify.js
+│           └── vendor
+│               ├── jquery
+│               │   ├── jquery.js
+│               │   ├── jquery.min.js
+│               │   └── LICENSE.txt
+│               ├── select2
+│               │   ├── i18n
+│               │   │   ├── af.js
+│               │   │   ├── ar.js
+│               │   │   ├── az.js
+│               │   │   ├── bg.js
+│               │   │   ├── bn.js
+│               │   │   ├── bs.js
+│               │   │   ├── ca.js
+│               │   │   ├── cs.js
+│               │   │   ├── da.js
+│               │   │   ├── de.js
+│               │   │   ├── dsb.js
+│               │   │   ├── el.js
+│               │   │   ├── en.js
+│               │   │   ├── es.js
+│               │   │   ├── et.js
+│               │   │   ├── eu.js
+│               │   │   ├── fa.js
+│               │   │   ├── fi.js
+│               │   │   ├── fr.js
+│               │   │   ├── gl.js
+│               │   │   ├── he.js
+│               │   │   ├── hi.js
+│               │   │   ├── hr.js
+│               │   │   ├── hsb.js
+│               │   │   ├── hu.js
+│               │   │   ├── hy.js
+│               │   │   ├── id.js
+│               │   │   ├── is.js
+│               │   │   ├── it.js
+│               │   │   ├── ja.js
+│               │   │   ├── ka.js
+│               │   │   ├── km.js
+│               │   │   ├── ko.js
+│               │   │   ├── lt.js
+│               │   │   ├── lv.js
+│               │   │   ├── mk.js
+│               │   │   ├── ms.js
+│               │   │   ├── nb.js
+│               │   │   ├── ne.js
+│               │   │   ├── nl.js
+│               │   │   ├── pl.js
+│               │   │   ├── ps.js
+│               │   │   ├── pt-BR.js
+│               │   │   ├── pt.js
+│               │   │   ├── ro.js
+│               │   │   ├── ru.js
+│               │   │   ├── sk.js
+│               │   │   ├── sl.js
+│               │   │   ├── sq.js
+│               │   │   ├── sr-Cyrl.js
+│               │   │   ├── sr.js
+│               │   │   ├── sv.js
+│               │   │   ├── th.js
+│               │   │   ├── tk.js
+│               │   │   ├── tr.js
+│               │   │   ├── uk.js
+│               │   │   ├── vi.js
+│               │   │   ├── zh-CN.js
+│               │   │   └── zh-TW.js
+│               │   ├── LICENSE.md
+│               │   ├── select2.full.js
+│               │   └── select2.full.min.js
+│               └── xregexp
+│                   ├── LICENSE.txt
+│                   ├── xregexp.js
+│                   └── xregexp.min.js
+├── templates
+│   └── admin
+│       └── transcoder
+│           ├── channel
+│           │   └── change_list.html
+│           ├── overview.html
+│           └── overview_old.html
+├── transcoder
+│   ├── admin.py
+│   ├── admin_views.py
+│   ├── apps.py
+│   ├── ffmpeg_runner.py
+│   ├── __init__.py
+│   ├── management
+│   │   ├── commands
+│   │   │   ├── deploy_production.py
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   └── transcoder_enforcer.cpython-312.pyc
+│   │   │   ├── run_channel_ffmpeg.py
+│   │   │   ├── show_ffmpeg_cmd.py
+│   │   │   └── transcoder_enforcer.py
+│   │   ├── __init__.py
+│   │   └── __pycache__
+│   │       └── __init__.cpython-312.pyc
+│   ├── migrations
+│   │   ├── 0001_initial.py
+│   │   ├── 0002_channel_playback_tail_enabled.py
+│   │   ├── 0003_alter_channel_options_remove_channel_delay_seconds_and_more.py
+│   │   ├── __init__.py
+│   │   └── __pycache__
+│   │       ├── 0001_initial.cpython-312.pyc
+│   │       ├── 0002_channel_playback_tail_enabled.cpython-312.pyc
+│   │       ├── 0003_alter_channel_options_remove_channel_delay_seconds_and_more.cpython-312.pyc
+│   │       └── __init__.cpython-312.pyc
+│   ├── models.py
+│   ├── __pycache__
+│   │   ├── admin.cpython-312.pyc
+│   │   ├── admin_views.cpython-312.pyc
+│   │   ├── apps.cpython-312.pyc
+│   │   ├── ffmpeg_runner.cpython-312.pyc
+│   │   ├── __init__.cpython-312.pyc
+│   │   └── models.cpython-312.pyc
+│   ├── retention.py
+│   ├── templatetags
+│   │   ├── __pycache__
+│   │   │   └── transcoder_extras.cpython-312.pyc
+│   │   └── transcoder_extras.py
+│   ├── tests.py
+│   └── views.py
+└── tree.txt
+
+44 directories, 350 files

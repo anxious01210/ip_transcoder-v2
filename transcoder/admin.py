@@ -9,6 +9,14 @@ from django.utils import timezone
 from .models import Channel, InputType, OutputType, TimeShiftProfile
 
 
+class TimeShiftProfileInline(admin.StackedInline):
+    """Edit delay settings directly from the Channel page."""
+    model = TimeShiftProfile
+    extra = 0
+    can_delete = False
+    fields = ("enabled", "delay_seconds")
+
+
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
     change_list_template = "admin/transcoder/channel/change_list.html"
@@ -20,26 +28,35 @@ class ChannelAdmin(admin.ModelAdmin):
         "input_url",
         "output_type",
         "output_target",
+        "playback_tail_enabled",
+        "timeshift_delay",
         "schedule_summary",
         "auto_delete_enabled",
         "auto_delete_after_segments",
         "auto_delete_after_days",
         "created_at",
     )
-    list_filter = ("enabled", "input_type", "output_type", "auto_delete_enabled")
+    list_filter = (
+        "enabled",
+        "input_type",
+        "output_type",
+        "auto_delete_enabled",
+        "playback_tail_enabled",
+    )
     search_fields = ("name", "input_url", "output_target")
+
+    inlines = [TimeShiftProfileInline]
 
     fieldsets = (
         ("Basics", {"fields": ("name", "enabled", "is_test_channel")}),
         ("Input", {"fields": ("input_type", "input_url", "multicast_interface")}),
-        ("Output", {"fields": ("output_type", "output_target")}),
-        ("Schedule", {
-            "fields": (
-                ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
-                ("start_time", "end_time"),
-                ("date_from", "date_to"),
-            )
-        }),
+        ("Output", {"fields": ("output_type", "output_target", "playback_tail_enabled")}), ("Schedule", {
+        "fields": (
+            ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
+            ("start_time", "end_time"),
+            ("date_from", "date_to"),
+        )
+    }),
         ("Recording & Auto-delete", {
             "fields": (
                 "recording_path_template",
@@ -54,6 +71,52 @@ class ChannelAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = ("created_at", "updated_at")
+
+    def _get_ts_profile(self, chan: Channel):
+        # supports either related_name="timeshift_profile" OR Django default "timeshiftprofile"
+        return (
+                getattr(chan, "timeshift_profile", None)
+                or getattr(chan, "timeshiftprofile", None)
+        )
+
+    # def timeshift_delay(self, obj: Channel):
+    #     """Nice delay column in list view."""
+    #     try:
+    #         prof = getattr(obj, "timeshift_profile", None)
+    #     except Exception:
+    #         prof = None
+    #     if not prof or not getattr(prof, "enabled", False):
+    #         return "-"
+    #     minutes = getattr(prof, "delay_minutes", None)
+    #     if minutes is None:
+    #         return "-"
+    #     # show as H:MM if >= 60
+    #     if minutes >= 60:
+    #         h = minutes // 60
+    #         m = minutes % 60
+    #         return f"{h}h {m:02d}m"
+    #     return f"{minutes}m"
+    def timeshift_delay(self, obj: Channel):
+        prof = self._get_ts_profile(obj)
+        if not prof or not getattr(prof, "enabled", False):
+            return "-"
+
+        sec = int(getattr(prof, "delay_seconds", 0) or 0)
+        if sec <= 0:
+            return "LIVE (0s)"
+
+        # show as H:MM:SS
+        h = sec // 3600
+        m = (sec % 3600) // 60
+        s = sec % 60
+        if h > 0:
+            return f"{h}h {m:02d}m {s:02d}s"
+        if m > 0:
+            return f"{m}m {s:02d}s"
+        return f"{s}s"
+
+    timeshift_delay.short_description = "Delay"
+    timeshift_delay.admin_order_field = "timeshiftprofile__delay_seconds"
 
     # ------------------------
     # Admin tools (no JS)
@@ -147,7 +210,7 @@ class ChannelAdmin(admin.ModelAdmin):
             return self._changelist_redirect()
 
         chan = Channel.objects.create(**self._build_test_defaults())
-        TimeShiftProfile.objects.create(channel=chan, enabled=True, delay_minutes=1)
+        TimeShiftProfile.objects.create(channel=chan, enabled=True, delay_seconds=0)
 
         self.message_user(
             request,

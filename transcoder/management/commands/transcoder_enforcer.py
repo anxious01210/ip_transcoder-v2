@@ -35,12 +35,12 @@ class Command(BaseCommand):
 
         window_seconds = int(getattr(settings, "PLAYBACK_PLAYLIST_WINDOW_SECONDS", 3 * 3600))
 
-        delay_minutes = 0
-        profile = getattr(chan, "timeshift_profile", None)
+        delay_seconds = 0
+        profile = getattr(chan, "timeshift_profile", None) or getattr(chan, "timeshiftprofile", None)
         if profile and getattr(profile, "enabled", False):
-            delay_minutes = int(profile.delay_minutes or 0)
+            delay_seconds = int(getattr(profile, "delay_seconds", 0) or 0)
 
-        protect_seconds = delay_minutes * 60 + window_seconds + (chan.recording_segment_minutes * 60)
+        protect_seconds = delay_seconds + window_seconds + (chan.recording_segment_minutes * 60)
         protect_after = (now - timedelta(seconds=protect_seconds)).replace(tzinfo=None)
 
         # Derive recordings root
@@ -115,22 +115,69 @@ class Command(BaseCommand):
                     if not chan.is_active_now(now):
                         continue
 
-                    # Always RECORD when active
-                    key_rec: JobKey = (JobPurpose.RECORD, chan.id)
-                    desired_jobs[key_rec] = f"{chan.name} [record]"
+                    profile = getattr(chan, "timeshift_profile", None) or getattr(chan, "timeshiftprofile", None)
+                    enabled_prof = bool(profile and getattr(profile, "enabled", False))
+                    delay_seconds = int(getattr(profile, "delay_seconds", 0) or 0)
 
-                    # Optionally PLAYBACK (time-shift)
-                    profile = getattr(chan, "timeshift_profile", None)
-                    if profile and getattr(profile, "enabled", False):
-                        if (chan.output_type == "udp_ts") and (chan.output_target or "").strip():
+                    has_udp_out = (chan.output_type == "udp_ts") and (chan.output_target or "").strip()
+
+                    # LIVE mode (delay 0 or profile missing/disabled): playback only (no recording)
+                    if has_udp_out and (not enabled_prof or delay_seconds <= 0):
+                        key_play: JobKey = (JobPurpose.PLAYBACK, chan.id)
+                        desired_jobs[key_play] = f"{chan.name} [LIVE playback]"
+
+                    # TIME-SHIFT mode (delay > 0): record + delayed playback
+                    if enabled_prof and delay_seconds > 0:
+                        key_rec: JobKey = (JobPurpose.RECORD, chan.id)
+                        desired_jobs[key_rec] = f"{chan.name} [record]"
+
+                        if has_udp_out:
                             key_play: JobKey = (JobPurpose.PLAYBACK, chan.id)
-                            desired_jobs[key_play] = f"{chan.name} [record+timeshift: playback]"
+                            desired_jobs[key_play] = f"{chan.name} [timeshift playback]"
 
                 # Start missing desired jobs
                 for key, descr in desired_jobs.items():
                     proc = running.get(key)
+
+                    # If ffmpeg is already running, we may still need a restart
+                    # (e.g. admin changed output_target, so the command must change).
                     if proc is not None and proc.poll() is None:
-                        continue
+                        purpose, channel_id = key
+
+                        # Only playback depends on output_target; record does not.
+                        if purpose == JobPurpose.PLAYBACK:
+                            # Always compare against the correct channel for this key
+                            this_chan = next(c for c in channels if c.id == channel_id)
+
+                            desired_cmd = None
+                            try:
+                                desired_cmd = FFmpegJobConfig(channel=this_chan, purpose=purpose).build_command()
+
+                            except Exception:
+                                # If we can't build a command right now, keep running and retry next poll.
+                                desired_cmd = None
+
+                            # Store the last command per job so we can detect changes safely
+                            if not hasattr(self, "_last_cmd"):
+                                self._last_cmd = {}
+                            last_cmd = self._last_cmd.get(key)
+
+                            if desired_cmd and last_cmd and desired_cmd != last_cmd:
+                                self.stdout.write(
+                                    self.style.WARNING(
+                                        f"Restarting ffmpeg for {descr} (command changed, likely output_target updated)..."
+                                    )
+                                )
+                                proc.terminate()
+                                del running[key]
+                                # fall through to start logic below (will rebuild & start)
+                            else:
+                                # Record current desired cmd (first time) then keep running
+                                if desired_cmd and not last_cmd:
+                                    self._last_cmd[key] = desired_cmd
+                                continue
+                        else:
+                            continue
 
                     purpose, channel_id = key
                     chan = next(c for c in channels if c.id == channel_id)
@@ -155,6 +202,10 @@ class Command(BaseCommand):
                         self.stdout.write(self.style.WARNING(f"Failed to start ffmpeg for {descr}: {e}"))
                         continue
                     running[key] = proc
+
+                    if not hasattr(self, "_last_cmd"):
+                        self._last_cmd = {}
+                    self._last_cmd[key] = cmd
 
                 # Stop jobs no longer desired
                 for key, proc in list(running.items()):

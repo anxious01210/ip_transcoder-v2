@@ -63,7 +63,7 @@ class Channel(models.Model):
     input_type = models.CharField(
         max_length=20,
         choices=InputType.choices,
-        default=InputType.MULTICAST_UDP,   # ✅ default prevents migration prompt
+        default=InputType.MULTICAST_UDP,  # ✅ default prevents migration prompt
     )
 
     input_url = models.CharField(
@@ -228,18 +228,43 @@ class Channel(models.Model):
         return (local_time >= start_time) or (local_time < end_time)
 
 
+# class TimeShiftProfile(models.Model):
+#     """
+#     Delay configuration for a channel.
+#     Output destination is channel.output_target (single output design).
+#     """
+#     channel = models.OneToOneField(Channel, on_delete=models.CASCADE, related_name="timeshift_profile")
+#     enabled = models.BooleanField(default=False)
+#
+#     delay_minutes = models.PositiveIntegerField(
+#         default=60,
+#         validators=[MaxValueValidator(24 * 60)],  # 0..1440
+#         help_text="Delay amount in minutes (0..1440).",
+#     )
+#
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+#
+#     class Meta:
+#         verbose_name = "Time-shift profile"
+#         verbose_name_plural = "Time-shift profiles"
+#
+#     def __str__(self) -> str:
+#         return f"TimeShift({self.channel.name}, {self.delay_minutes} min)"
+# models.py
+
 class TimeShiftProfile(models.Model):
-    """
-    Delay configuration for a channel.
-    Output destination is channel.output_target (single output design).
-    """
     channel = models.OneToOneField(Channel, on_delete=models.CASCADE, related_name="timeshift_profile")
     enabled = models.BooleanField(default=False)
 
-    delay_minutes = models.PositiveIntegerField(
-        default=60,
-        validators=[MaxValueValidator(24 * 60)],  # 0..1440
-        help_text="Delay amount in minutes (0..1440).",
+    delay_seconds = models.PositiveIntegerField(
+        default=0,
+        validators=[MaxValueValidator(24 * 60 * 60)],  # 0..86400
+        help_text=(
+            "Delay in seconds (0..86400). "
+            "0 = LIVE mode (no recording, direct restream from input to output). "
+            ">0 = Time-shift mode (records to disk then plays back with this delay)."
+        ),
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -250,4 +275,4 @@ class TimeShiftProfile(models.Model):
         verbose_name_plural = "Time-shift profiles"
 
     def __str__(self) -> str:
-        return f"TimeShift({self.channel.name}, {self.delay_minutes} min)"
+        return f"TimeShift({self.channel.name}, {self.delay_seconds}s)"
