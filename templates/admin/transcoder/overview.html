@@ -1,6 +1,10 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
+{% block branding %}
+  <h1 id="site-name"><a href="{% url 'admin:index' %}">IP TransCoder</a></h1>
+{% endblock %}
+
 {% block extrastyle %}
   <style>
       :root {
@@ -225,125 +229,132 @@
           margin-bottom: 6px;
       }
 
-        /* ------------------------------------------------------------
-           Light-mode compatibility FIX (only for the bottom results table)
-           - Django admin light theme overrides <table>/<th>/<td> colors.
-           - We override ONLY the channels results section.
-           ------------------------------------------------------------ */
+      /* ------------------------------------------------------------
+         Light-mode compatibility FIX (only for the bottom results table)
+         - Django admin light theme overrides <table>/<th>/<td> colors.
+         - We override ONLY the channels results section.
+         ------------------------------------------------------------ */
 
 
-        /* Light-mode fix: HERO only (top section). Keep everything else unchanged. */
-        :root[data-theme="light"] .ipx-hero,
-        html[data-theme="light"] .ipx-hero,
-        body[data-theme="light"] .ipx-hero,
-        html.theme-light .ipx-hero,
-        body.theme-light .ipx-hero {
+      /* Light-mode fix: HERO only (top section). Keep everything else unchanged. */
+      :root[data-theme="light"] .ipx-hero,
+      html[data-theme="light"] .ipx-hero,
+      body[data-theme="light"] .ipx-hero,
+      html.theme-light .ipx-hero,
+      body.theme-light .ipx-hero {
           background: linear-gradient(180deg, rgba(56, 189, 248, 0.14), rgba(255, 255, 255, 0.92)) !important;
           border-color: rgba(15, 23, 42, 0.12) !important;
           box-shadow: 0 12px 28px rgba(2, 6, 23, 0.08) !important;
-        }
+      }
 
-        :root[data-theme="light"] .ipx-hero h1,
-        html[data-theme="light"] .ipx-hero h1,
-        body[data-theme="light"] .ipx-hero h1,
-        html.theme-light .ipx-hero h1,
-        body.theme-light .ipx-hero h1 {
+      :root[data-theme="light"] .ipx-hero h1,
+      html[data-theme="light"] .ipx-hero h1,
+      body[data-theme="light"] .ipx-hero h1,
+      html.theme-light .ipx-hero h1,
+      body.theme-light .ipx-hero h1 {
           color: #0f172a !important;
-        }
+      }
 
-        :root[data-theme="light"] .ipx-hero p,
-        html[data-theme="light"] .ipx-hero p,
-        body[data-theme="light"] .ipx-hero p,
-        html.theme-light .ipx-hero p,
-        body.theme-light .ipx-hero p {
+      :root[data-theme="light"] .ipx-hero p,
+      html[data-theme="light"] .ipx-hero p,
+      body[data-theme="light"] .ipx-hero p,
+      html.theme-light .ipx-hero p,
+      body.theme-light .ipx-hero p {
           color: #334155 !important;
-        }
+      }
 
-        :root[data-theme="light"] .ipx-hero .ipx-pill,
-        html[data-theme="light"] .ipx-hero .ipx-pill,
-        body[data-theme="light"] .ipx-hero .ipx-pill,
-        html.theme-light .ipx-hero .ipx-pill,
-        body.theme-light .ipx-hero .ipx-pill {
+      :root[data-theme="light"] .ipx-hero .ipx-pill,
+      html[data-theme="light"] .ipx-hero .ipx-pill,
+      body[data-theme="light"] .ipx-hero .ipx-pill,
+      html.theme-light .ipx-hero .ipx-pill,
+      body.theme-light .ipx-hero .ipx-pill {
           background: rgba(15, 23, 42, 0.06) !important;
           border-color: rgba(15, 23, 42, 0.14) !important;
           color: #0f172a !important;
-        }
+      }
 
-        @media (prefers-color-scheme: light) {
+      @media (prefers-color-scheme: light) {
           .ipx-hero {
-            background: linear-gradient(180deg, rgba(56, 189, 248, 0.14), rgba(255, 255, 255, 0.92)) !important;
-            border-color: rgba(15, 23, 42, 0.12) !important;
-            box-shadow: 0 12px 28px rgba(2, 6, 23, 0.08) !important;
+              background: linear-gradient(180deg, rgba(56, 189, 248, 0.14), rgba(255, 255, 255, 0.92)) !important;
+              border-color: rgba(15, 23, 42, 0.12) !important;
+              box-shadow: 0 12px 28px rgba(2, 6, 23, 0.08) !important;
           }
-          .ipx-hero h1 { color: #0f172a !important; }
-          .ipx-hero p { color: #334155 !important; }
+
+          .ipx-hero h1 {
+              color: #0f172a !important;
+          }
+
+          .ipx-hero p {
+              color: #334155 !important;
+          }
+
           .ipx-hero .ipx-pill {
-            background: rgba(15, 23, 42, 0.06) !important;
-            border-color: rgba(15, 23, 42, 0.14) !important;
-            color: #0f172a !important;
+              background: rgba(15, 23, 42, 0.06) !important;
+              border-color: rgba(15, 23, 42, 0.14) !important;
+              color: #0f172a !important;
           }
-        }
+      }
 
-/* Targets common Django admin theme toggles + fallback to OS light preference. */
-        :root[data-theme="light"] .ipx-results .ipx-table,
-        html[data-theme="light"] .ipx-results .ipx-table,
-        body[data-theme="light"] .ipx-results .ipx-table,
-        html.theme-light .ipx-results .ipx-table,
-        body.theme-light .ipx-results .ipx-table {
+      /* Targets common Django admin theme toggles + fallback to OS light preference. */
+      :root[data-theme="light"] .ipx-results .ipx-table,
+      html[data-theme="light"] .ipx-results .ipx-table,
+      body[data-theme="light"] .ipx-results .ipx-table,
+      html.theme-light .ipx-results .ipx-table,
+      body.theme-light .ipx-results .ipx-table {
           color: #e8eef6 !important;
           background: transparent !important;
-        }
+      }
 
-        :root[data-theme="light"] .ipx-results .ipx-table thead,
-        :root[data-theme="light"] .ipx-results .ipx-table thead tr,
-        :root[data-theme="light"] .ipx-results .ipx-table thead th,
-        html[data-theme="light"] .ipx-results .ipx-table thead,
-        html[data-theme="light"] .ipx-results .ipx-table thead tr,
-        html[data-theme="light"] .ipx-results .ipx-table thead th,
-        body[data-theme="light"] .ipx-results .ipx-table thead,
-        body[data-theme="light"] .ipx-results .ipx-table thead tr,
-        body[data-theme="light"] .ipx-results .ipx-table thead th,
-        html.theme-light .ipx-results .ipx-table thead,
-        html.theme-light .ipx-results .ipx-table thead tr,
-        html.theme-light .ipx-results .ipx-table thead th,
-        body.theme-light .ipx-results .ipx-table thead,
-        body.theme-light .ipx-results .ipx-table thead tr,
-        body.theme-light .ipx-results .ipx-table thead th {
-          background: rgba(0,0,0,0.30) !important;
+      :root[data-theme="light"] .ipx-results .ipx-table thead,
+      :root[data-theme="light"] .ipx-results .ipx-table thead tr,
+      :root[data-theme="light"] .ipx-results .ipx-table thead th,
+      html[data-theme="light"] .ipx-results .ipx-table thead,
+      html[data-theme="light"] .ipx-results .ipx-table thead tr,
+      html[data-theme="light"] .ipx-results .ipx-table thead th,
+      body[data-theme="light"] .ipx-results .ipx-table thead,
+      body[data-theme="light"] .ipx-results .ipx-table thead tr,
+      body[data-theme="light"] .ipx-results .ipx-table thead th,
+      html.theme-light .ipx-results .ipx-table thead,
+      html.theme-light .ipx-results .ipx-table thead tr,
+      html.theme-light .ipx-results .ipx-table thead th,
+      body.theme-light .ipx-results .ipx-table thead,
+      body.theme-light .ipx-results .ipx-table thead tr,
+      body.theme-light .ipx-results .ipx-table thead th {
+          background: rgba(0, 0, 0, 0.30) !important;
           color: #e8eef6 !important;
-          border-color: rgba(255,255,255,0.12) !important;
-        }
+          border-color: rgba(255, 255, 255, 0.12) !important;
+      }
 
-        :root[data-theme="light"] .ipx-results .ipx-table tbody,
-        :root[data-theme="light"] .ipx-results .ipx-table tbody tr,
-        :root[data-theme="light"] .ipx-results .ipx-table tbody td,
-        html[data-theme="light"] .ipx-results .ipx-table tbody,
-        html[data-theme="light"] .ipx-results .ipx-table tbody tr,
-        html[data-theme="light"] .ipx-results .ipx-table tbody td,
-        body[data-theme="light"] .ipx-results .ipx-table tbody,
-        body[data-theme="light"] .ipx-results .ipx-table tbody tr,
-        body[data-theme="light"] .ipx-results .ipx-table tbody td,
-        html.theme-light .ipx-results .ipx-table tbody,
-        html.theme-light .ipx-results .ipx-table tbody tr,
-        html.theme-light .ipx-results .ipx-table tbody td,
-        body.theme-light .ipx-results .ipx-table tbody,
-        body.theme-light .ipx-results .ipx-table tbody tr,
-        body.theme-light .ipx-results .ipx-table tbody td {
+      :root[data-theme="light"] .ipx-results .ipx-table tbody,
+      :root[data-theme="light"] .ipx-results .ipx-table tbody tr,
+      :root[data-theme="light"] .ipx-results .ipx-table tbody td,
+      html[data-theme="light"] .ipx-results .ipx-table tbody,
+      html[data-theme="light"] .ipx-results .ipx-table tbody tr,
+      html[data-theme="light"] .ipx-results .ipx-table tbody td,
+      body[data-theme="light"] .ipx-results .ipx-table tbody,
+      body[data-theme="light"] .ipx-results .ipx-table tbody tr,
+      body[data-theme="light"] .ipx-results .ipx-table tbody td,
+      html.theme-light .ipx-results .ipx-table tbody,
+      html.theme-light .ipx-results .ipx-table tbody tr,
+      html.theme-light .ipx-results .ipx-table tbody td,
+      body.theme-light .ipx-results .ipx-table tbody,
+      body.theme-light .ipx-results .ipx-table tbody tr,
+      body.theme-light .ipx-results .ipx-table tbody td {
           background: transparent !important;
           color: #e8eef6 !important;
-          border-color: rgba(255,255,255,0.10) !important;
-        }
+          border-color: rgba(255, 255, 255, 0.10) !important;
+      }
 
-        :root[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
-        html[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
-        body[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
-        html.theme-light .ipx-results .ipx-table tbody tr:hover td,
-        body.theme-light .ipx-results .ipx-table tbody tr:hover td {
-          background: rgba(255,255,255,0.06) !important;
-        }
+      :root[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
+      html[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
+      body[data-theme="light"] .ipx-results .ipx-table tbody tr:hover td,
+      html.theme-light .ipx-results .ipx-table tbody tr:hover td,
+      body.theme-light .ipx-results .ipx-table tbody tr:hover td {
+          background: rgba(255, 255, 255, 0.06) !important;
+      }
 
-        /* OS preference fallback (if Django theme attributes are not present). */
-        @media (prefers-color-scheme: light) {
+      /* OS preference fallback (if Django theme attributes are not present). */
+      @media (prefers-color-scheme: light) {
           .ipx-results .ipx-table,
           .ipx-results .ipx-table thead,
           .ipx-results .ipx-table thead tr,
@@ -351,15 +362,35 @@
           .ipx-results .ipx-table tbody,
           .ipx-results .ipx-table tbody tr,
           .ipx-results .ipx-table tbody td {
-            background: transparent !important;
-            color: #e8eef6 !important;
-            border-color: rgba(255,255,255,0.10) !important;
+              background: transparent !important;
+              color: #e8eef6 !important;
+              border-color: rgba(255, 255, 255, 0.10) !important;
           }
-          .ipx-results .ipx-table thead th { background: rgba(0,0,0,0.30) !important; }
-          .ipx-results .ipx-table tbody tr:hover td { background: rgba(255,255,255,0.06) !important; }
-        }
 
-</style>
+          .ipx-results .ipx-table thead th {
+              background: rgba(0, 0, 0, 0.30) !important;
+          }
+
+          .ipx-results .ipx-table tbody tr:hover td {
+              background: rgba(255, 255, 255, 0.06) !important;
+          }
+      }
+
+      /* Force the top-left Admin branding text to stay yellow (light + dark) */
+      #header #site-name a,
+      #header #site-name a:visited,
+      #site-name a,
+      #site-name a:visited {
+          color: #facc15 !important; /* yellow */
+      }
+
+      #header #site-name a:hover,
+      #site-name a:hover {
+          color: #fde047 !important; /* slightly brighter yellow on hover */
+          text-decoration: none !important;
+      }
+
+  </style>
 {% endblock %}
 
 {% block content %}

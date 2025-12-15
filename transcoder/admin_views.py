@@ -1,6 +1,7 @@
 # transcoder/admin_views.py
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
+from django.contrib import admin
 
 from .models import Channel
 
@@ -17,6 +18,7 @@ def transcoder_overview(request):
     channels = Channel.objects.all()
 
     context = {
+        **admin.site.each_context(request),  # REQUIRED for usertools + theme toggle
         "title": "IP Transcoder Overview",
         "channels": channels,
     }
