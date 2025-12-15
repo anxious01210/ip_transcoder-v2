@@ -93,7 +93,18 @@ class Channel(models.Model):
     output_target = models.CharField(
         max_length=512,
         default="udp://127.0.0.1:5002",  # ✅ default prevents migration prompt
-        help_text="For UDP/RTMP: URL (udp://ip:port, rtmp://...). For HLS: directory path.",
+        help_text=(
+            "Destination for the channel output.\n\n"
+            "✅ Unicast (send to one receiver):\n"
+            "  udp://10.120.0.111:5000?pkt_size=1316\n\n"
+            "✅ Multicast (send to many receivers):\n"
+            "  udp://239.0.0.1:5000?pkt_size=1316&ttl=16\n\n"
+            "Notes:\n"
+            "• You can enter a multicast group (239.x/232.x) even if you think of it as “unicast mode” — "
+            "it’s still the same UDP-TS output; only the destination IP changes.\n"
+            "• Useful options: pkt_size=1316, ttl=… (multicast), localaddr=… (force interface, helpful on Windows).\n"
+        )
+        ,
     )
 
     # Tail behavior (your earlier requirement)
