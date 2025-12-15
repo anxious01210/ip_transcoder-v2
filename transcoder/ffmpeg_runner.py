@@ -44,7 +44,13 @@ class FFmpegJobConfig:
             else:
                 args += ["-c:v", chan.video_codec or "libx264"]
                 if is_internal_gen:
-                    args += ["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"]
+                    args += [
+                        "-preset", "veryfast",
+                        "-tune", "zerolatency",
+                        "-pix_fmt", "yuv420p",
+                        "-g", "50",
+                        "-x264-params", "repeat-headers=1",
+                    ]
 
             # Audio codec
             if (not is_internal_gen) and chan.audio_mode == AudioMode.COPY:
@@ -68,10 +74,24 @@ class FFmpegJobConfig:
 
             output_udp_url = (chan.output_target or "").strip()
 
+            # # VLC-safe UDP TS output (works better when joining mid-stream)
+            # if output_udp_url.startswith("udp://") and "pkt_size=" not in output_udp_url:
+            #     sep = "&" if "?" in output_udp_url else "?"
+            #     output_udp_url = f"{output_udp_url}{sep}pkt_size=1316"
             # VLC-safe UDP TS output (works better when joining mid-stream)
             if output_udp_url.startswith("udp://") and "pkt_size=" not in output_udp_url:
                 sep = "&" if "?" in output_udp_url else "?"
                 output_udp_url = f"{output_udp_url}{sep}pkt_size=1316"
+
+            # If it's multicast, add a reasonable default TTL if not set
+            # (Not strictly required if your network already forwards it, but safe)
+            mcast_match = re.search(r"udp://(\d{1,3}\.){3}\d{1,3}", output_udp_url)
+            if mcast_match and "ttl=" not in output_udp_url:
+                ip = mcast_match.group(0).replace("udp://", "")
+                first_octet = int(ip.split(".")[0])
+                if 224 <= first_octet <= 239:
+                    sep = "&" if "?" in output_udp_url else "?"
+                    output_udp_url = f"{output_udp_url}{sep}ttl=16"
 
             profile: Optional[TimeShiftProfile] = (
                     getattr(chan, "timeshift_profile", None)
@@ -93,7 +113,13 @@ class FFmpegJobConfig:
                 else:
                     args += ["-c:v", chan.video_codec or "libx264"]
                     if is_internal_gen:
-                        args += ["-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"]
+                        args += [
+                            "-preset", "veryfast",
+                            "-tune", "zerolatency",
+                            "-pix_fmt", "yuv420p",
+                            "-g", "50",
+                            "-x264-params", "repeat-headers=1",
+                        ]
 
                 # Audio
                 if (not is_internal_gen) and chan.audio_mode == AudioMode.COPY:

@@ -69,6 +69,8 @@ Now confirm the Host header is accepted (this should NOT return 400 anymore):
 curl -I -H "Host: 10.120.0.80" http://127.0.0.1:8001/admin/login/
 Expected: 302 or 200, not 400.
 -------------------------------------------------------------------------------------------------
+to test for multicast target on another PC (localaddr=10.120.0.120)
+ffplay.exe -loglevel verbose -fflags nobuffer -flags low_delay -probesize 500000 -analyzeduration 1000000 "udp://@239.0.0.1:5000?localaddr=10.120.0.120&overrun_nonfatal=1&fifo_size=5000000"
 
 -------------------------------------------------------------------------------------------------
 
