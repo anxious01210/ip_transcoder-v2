@@ -22,6 +22,7 @@ class ChannelAdmin(admin.ModelAdmin):
     change_list_template = "admin/transcoder/channel/change_list.html"
 
     list_display = (
+        "id",
         "name",
         "enabled",
         "input_type",
@@ -44,6 +45,8 @@ class ChannelAdmin(admin.ModelAdmin):
         "playback_tail_enabled",
     )
     search_fields = ("name", "input_url", "output_target")
+    # These fields will be editable directly in the list view
+    list_editable = ['name', 'enabled', 'input_type', 'input_url', 'output_target',]
 
     inlines = [TimeShiftProfileInline]
 
